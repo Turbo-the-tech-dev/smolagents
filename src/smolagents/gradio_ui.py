@@ -400,8 +400,17 @@ class GradioUI:
                 else ""
             ),
             "",
-            gr.Button(interactive=False),
+            [],
+            gr.update(visible=False, interactive=False),
+            gr.update(visible=True, interactive=True),
         )
+
+    def interrupt_agent(self):
+        import gradio as gr
+
+        if hasattr(self.agent, "interrupt"):
+            self.agent.interrupt()
+        return gr.update(visible=False), gr.update(interactive=True, visible=True)
 
     def launch(self, share: bool = True, **kwargs):
         """
@@ -436,8 +445,10 @@ class GradioUI:
                         label="Chat Message",
                         container=False,
                         placeholder="Enter your prompt here and press Shift+Enter or press the button",
+                        autofocus=True,
                     )
-                    submit_btn = gr.Button("Submit", variant="primary")
+                    submit_btn = gr.Button("🚀 Submit", variant="primary")
+                    stop_btn = gr.Button("🛑 Stop", variant="danger", visible=False)
 
                 # If an upload folder is provided, enable the upload feature
                 if self.file_upload_folder is not None:
@@ -463,6 +474,7 @@ class GradioUI:
                 ),
                 resizeable=True,
                 scale=1,
+                show_copy_button=True,
                 latex_delimiters=[
                     {"left": r"$$", "right": r"$$", "display": True},
                     {"left": r"$", "right": r"$", "display": False},
@@ -472,35 +484,39 @@ class GradioUI:
             )
 
             # Set up event handlers
-            text_input.submit(
+            submit_event = text_input.submit(
                 self.log_user_message,
                 [text_input, file_uploads_log],
-                [stored_messages, text_input, submit_btn],
+                [stored_messages, text_input, file_uploads_log, submit_btn, stop_btn],
             ).then(self.interact_with_agent, [stored_messages, chatbot, session_state], [chatbot]).then(
                 lambda: (
-                    gr.Textbox(
+                    gr.update(
                         interactive=True, placeholder="Enter your prompt here and press Shift+Enter or the button"
                     ),
-                    gr.Button(interactive=True),
+                    gr.update(interactive=True, visible=True),
+                    gr.update(visible=False),
                 ),
                 None,
-                [text_input, submit_btn],
+                [text_input, submit_btn, stop_btn],
             )
 
-            submit_btn.click(
+            click_event = submit_btn.click(
                 self.log_user_message,
                 [text_input, file_uploads_log],
-                [stored_messages, text_input, submit_btn],
+                [stored_messages, text_input, file_uploads_log, submit_btn, stop_btn],
             ).then(self.interact_with_agent, [stored_messages, chatbot, session_state], [chatbot]).then(
                 lambda: (
-                    gr.Textbox(
+                    gr.update(
                         interactive=True, placeholder="Enter your prompt here and press Shift+Enter or the button"
                     ),
-                    gr.Button(interactive=True),
+                    gr.update(interactive=True, visible=True),
+                    gr.update(visible=False),
                 ),
                 None,
-                [text_input, submit_btn],
+                [text_input, submit_btn, stop_btn],
             )
+
+            stop_btn.click(self.interrupt_agent, None, [stop_btn, submit_btn], cancels=[submit_event, click_event])
 
             chatbot.clear(self.agent.memory.reset)
         return demo
