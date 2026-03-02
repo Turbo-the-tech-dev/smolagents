@@ -67,14 +67,16 @@ def _format_code_content(content: str) -> str:
         `str`: Code content formatted as a Python code block.
     """
     content = content.strip()
-    # Remove existing code blocks and end_code tags
-    content = re.sub(r"```.*?\n", "", content)
+    # If it's already a well-formatted python block, return as is
+    if content.startswith("```python") and content.endswith("```"):
+        return content
+    # Remove existing code blocks and end_code tags to avoid nesting
+    content = re.sub(r"```[a-zA-Z]*\n?", "", content)
+    content = re.sub(r"```", "", content)
     content = re.sub(r"\s*<end_code>\s*", "", content)
     content = content.strip()
-    # Add Python code block formatting if not already present
-    if not content.startswith("```python"):
-        content = f"```python\n{content}\n```"
-    return content
+    # Add Python code block formatting
+    return f"```python\n{content}\n```"
 
 
 def _process_action_step(step_log: ActionStep, skip_model_outputs: bool = False) -> Generator:
@@ -134,7 +136,7 @@ def _process_action_step(step_log: ActionStep, skip_model_outputs: bool = False)
             log_content = re.sub(r"^Execution logs:\s*", "", log_content)
             yield gr.ChatMessage(
                 role=MessageRole.ASSISTANT,
-                content=f"```bash\n{log_content}\n",
+                content=f"```bash\n{log_content}\n```",
                 metadata={"title": "📝 Execution Logs", "status": "done"},
             )
 
@@ -434,6 +436,7 @@ class GradioUI:
                     text_input = gr.Textbox(
                         lines=3,
                         label="Chat Message",
+                        show_label=False,
                         container=False,
                         placeholder="Enter your prompt here and press Shift+Enter or press the button",
                     )
@@ -479,7 +482,8 @@ class GradioUI:
             ).then(self.interact_with_agent, [stored_messages, chatbot, session_state], [chatbot]).then(
                 lambda: (
                     gr.Textbox(
-                        interactive=True, placeholder="Enter your prompt here and press Shift+Enter or the button"
+                        interactive=True,
+                        placeholder="Enter your prompt here and press Shift+Enter or press the button",
                     ),
                     gr.Button(interactive=True),
                 ),
@@ -494,7 +498,8 @@ class GradioUI:
             ).then(self.interact_with_agent, [stored_messages, chatbot, session_state], [chatbot]).then(
                 lambda: (
                     gr.Textbox(
-                        interactive=True, placeholder="Enter your prompt here and press Shift+Enter or the button"
+                        interactive=True,
+                        placeholder="Enter your prompt here and press Shift+Enter or press the button",
                     ),
                     gr.Button(interactive=True),
                 ),
