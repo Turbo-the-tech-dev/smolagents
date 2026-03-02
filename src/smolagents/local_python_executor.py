@@ -62,10 +62,20 @@ def custom_print(*args):
     return None
 
 
+def is_dunder(name):
+    return name.startswith("__") and name.endswith("__")
+
+
 def nodunder_getattr(obj, name, default=None):
-    if name.startswith("__") and name.endswith("__"):
+    if is_dunder(name):
         raise InterpreterError(f"Forbidden access to dunder attribute: {name}")
     return getattr(obj, name, default)
+
+
+def nodunder_setattr(obj, name, value):
+    if is_dunder(name):
+        raise InterpreterError(f"Forbidden access to dunder attribute: {name}")
+    return setattr(obj, name, value)
 
 
 BASE_PYTHON_TOOLS = {
@@ -117,7 +127,7 @@ BASE_PYTHON_TOOLS = {
     "callable": callable,
     "getattr": nodunder_getattr,
     "hasattr": hasattr,
-    "setattr": setattr,
+    "setattr": nodunder_setattr,
     "issubclass": issubclass,
     "type": type,
     "complex": complex,
@@ -535,6 +545,8 @@ def evaluate_class_def(
                 obj = evaluate_ast(target.value, class_dict, static_tools, custom_tools, authorized_imports)
                 # If there's a value assignment, set the attribute
                 if stmt.value:
+                    if is_dunder(target.attr):
+                        raise InterpreterError(f"Forbidden access to dunder attribute: {target.attr}")
                     setattr(obj, target.attr, value)
             elif isinstance(target, ast.Subscript):
                 # Subscript annotation like "dict[key]: int"
@@ -552,6 +564,8 @@ def evaluate_class_def(
                     class_dict[target.id] = value
                 elif isinstance(target, ast.Attribute):
                     obj = evaluate_ast(target.value, class_dict, static_tools, custom_tools, authorized_imports)
+                    if is_dunder(target.attr):
+                        raise InterpreterError(f"Forbidden access to dunder attribute: {target.attr}")
                     setattr(obj, target.attr, value)
         elif isinstance(stmt, ast.Pass):
             pass
@@ -771,6 +785,8 @@ def set_value(
         key = evaluate_ast(target.slice, state, static_tools, custom_tools, authorized_imports)
         obj[key] = value
     elif isinstance(target, ast.Attribute):
+        if is_dunder(target.attr):
+            raise InterpreterError(f"Forbidden access to dunder attribute: {target.attr}")
         obj = evaluate_ast(target.value, state, static_tools, custom_tools, authorized_imports)
         setattr(obj, target.attr, value)
 
@@ -1356,6 +1372,15 @@ def evaluate_delete(
                 del obj[index]
             except (TypeError, KeyError, IndexError) as e:
                 raise InterpreterError(f"Cannot delete index/key: {str(e)}")
+        elif isinstance(target, ast.Attribute):
+            # Handle attribute deletion (del x.y)
+            if is_dunder(target.attr):
+                raise InterpreterError(f"Forbidden access to dunder attribute: {target.attr}")
+            obj = evaluate_ast(target.value, state, static_tools, custom_tools, authorized_imports)
+            try:
+                delattr(obj, target.attr)
+            except (TypeError, AttributeError) as e:
+                raise InterpreterError(f"Cannot delete attribute: {str(e)}")
         else:
             raise InterpreterError(f"Deletion of {type(target).__name__} targets is not supported")
 
