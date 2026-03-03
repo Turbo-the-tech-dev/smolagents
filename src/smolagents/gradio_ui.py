@@ -467,20 +467,20 @@ class GradioUI:
             # Main chat interface
             chatbot = gr.Chatbot(
                 label="Agent",
-                type="messages",
                 avatar_images=(
                     None,
                     "https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/smolagents/mascot_smol.png",
                 ),
-                resizeable=True,
+                resizable=True,
                 scale=1,
-                show_copy_button=True,
+                buttons=["copy"],
                 latex_delimiters=[
                     {"left": r"$$", "right": r"$$", "display": True},
                     {"left": r"$", "right": r"$", "display": False},
                     {"left": r"\[", "right": r"\]", "display": True},
                     {"left": r"\(", "right": r"\)", "display": False},
                 ],
+                placeholder="Hi! I'm your agent. How can I help you today?",
             )
 
             # Set up event handlers
