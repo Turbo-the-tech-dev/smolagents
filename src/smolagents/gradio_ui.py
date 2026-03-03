@@ -134,7 +134,7 @@ def _process_action_step(step_log: ActionStep, skip_model_outputs: bool = False)
             log_content = re.sub(r"^Execution logs:\s*", "", log_content)
             yield gr.ChatMessage(
                 role=MessageRole.ASSISTANT,
-                content=f"```bash\n{log_content}\n",
+                content=f"```bash\n{log_content}\n```",
                 metadata={"title": "📝 Execution Logs", "status": "done"},
             )
 
@@ -420,12 +420,12 @@ class GradioUI:
             share (`bool`, defaults to `True`): Whether to share the app publicly.
             **kwargs: Additional keyword arguments to pass to the Gradio launch method.
         """
-        self.create_app().launch(debug=True, share=share, **kwargs)
+        self.create_app().launch(debug=True, share=share, theme="ocean", **kwargs)
 
     def create_app(self):
         import gradio as gr
 
-        with gr.Blocks(theme="ocean", fill_height=True) as demo:
+        with gr.Blocks(fill_height=True) as demo:
             # Add session state to store session-specific data
             session_state = gr.State({})
             stored_messages = gr.State([])
@@ -467,14 +467,14 @@ class GradioUI:
             # Main chat interface
             chatbot = gr.Chatbot(
                 label="Agent",
-                type="messages",
                 avatar_images=(
                     None,
                     "https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/smolagents/mascot_smol.png",
                 ),
-                resizeable=True,
+                placeholder="Hi! I'm your agent. How can I help you today?",
+                resizable=True,
+                buttons=["copy", "copy_all"],
                 scale=1,
-                show_copy_button=True,
                 latex_delimiters=[
                     {"left": r"$$", "right": r"$$", "display": True},
                     {"left": r"$", "right": r"$", "display": False},
