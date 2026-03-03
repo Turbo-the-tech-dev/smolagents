@@ -24,7 +24,7 @@ import re
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Generator, Mapping
 from dataclasses import dataclass
-from functools import wraps
+from functools import lru_cache, wraps
 from importlib import import_module
 from importlib.util import find_spec
 from types import BuiltinFunctionType, FunctionType, ModuleType
@@ -162,6 +162,8 @@ def check_safer_result(result: Any, static_tools: dict[str, Callable] = None, au
     Raises:
         InterpreterError: If the result is not safe
     """
+    if result is None or isinstance(result, (bool, int, float, str)):
+        return
     if isinstance(result, ModuleType):
         if not check_import_authorized(result.__name__, authorized_imports):
             raise InterpreterError(f"Forbidden access to module: {result.__name__}")
@@ -310,7 +312,8 @@ def fix_final_answer_code(code: str) -> str:
     return code
 
 
-def build_import_tree(authorized_imports: list[str]) -> dict[str, Any]:
+@lru_cache
+def build_import_tree(authorized_imports: tuple[str]) -> dict[str, Any]:
     tree = {}
     for import_path in authorized_imports:
         parts = import_path.split(".")
@@ -323,7 +326,7 @@ def build_import_tree(authorized_imports: list[str]) -> dict[str, Any]:
 
 
 def check_import_authorized(import_to_check: str, authorized_imports: list[str]) -> bool:
-    current_node = build_import_tree(authorized_imports)
+    current_node = build_import_tree(tuple(authorized_imports))
     for part in import_to_check.split("."):
         if "*" in current_node:
             return True
@@ -1253,7 +1256,7 @@ def get_safe_module(raw_module, authorized_imports, visited=None):
     return safe_module
 
 
-def evaluate_import(expression, state, authorized_imports):
+def evaluate_import(expression, state, static_tools, custom_tools, authorized_imports):
     if isinstance(expression, ast.Import):
         for alias in expression.names:
             if check_import_authorized(alias.name, authorized_imports):
@@ -1324,6 +1327,50 @@ def evaluate_generatorexp(
     return generator()
 
 
+def evaluate_break(expression, state, static_tools, custom_tools, authorized_imports):
+    raise BreakException()
+
+
+def evaluate_continue(expression, state, static_tools, custom_tools, authorized_imports):
+    raise ContinueException()
+
+
+def evaluate_dict(expression, state, static_tools, custom_tools, authorized_imports):
+    keys = (evaluate_ast(k, state, static_tools, custom_tools, authorized_imports) for k in expression.keys)
+    values = (evaluate_ast(v, state, static_tools, custom_tools, authorized_imports) for v in expression.values)
+    return dict(zip(keys, values))
+
+
+def evaluate_formatted_value(expression, state, static_tools, custom_tools, authorized_imports):
+    value = evaluate_ast(expression.value, state, static_tools, custom_tools, authorized_imports)
+    if not expression.format_spec:
+        return value
+    format_spec = evaluate_ast(expression.format_spec, state, static_tools, custom_tools, authorized_imports)
+    return format(value, format_spec)
+
+
+def evaluate_joined_str(expression, state, static_tools, custom_tools, authorized_imports):
+    return "".join(
+        [str(evaluate_ast(v, state, static_tools, custom_tools, authorized_imports)) for v in expression.values]
+    )
+
+
+def evaluate_ifexp(expression, state, static_tools, custom_tools, authorized_imports):
+    test_val = evaluate_ast(expression.test, state, static_tools, custom_tools, authorized_imports)
+    if test_val:
+        return evaluate_ast(expression.body, state, static_tools, custom_tools, authorized_imports)
+    else:
+        return evaluate_ast(expression.orelse, state, static_tools, custom_tools, authorized_imports)
+
+
+def evaluate_return(expression, state, static_tools, custom_tools, authorized_imports):
+    raise ReturnException(
+        evaluate_ast(expression.value, state, static_tools, custom_tools, authorized_imports)
+        if expression.value
+        else None
+    )
+
+
 def evaluate_delete(
     delete_node: ast.Delete,
     state: dict[str, Any],
@@ -1360,6 +1407,59 @@ def evaluate_delete(
             raise InterpreterError(f"Deletion of {type(target).__name__} targets is not supported")
 
 
+NODE_HANDLERS = {
+    ast.Assign: evaluate_assign,
+    ast.AnnAssign: evaluate_annassign,
+    ast.AugAssign: evaluate_augassign,
+    ast.Call: evaluate_call,
+    ast.Constant: lambda expr, *args: expr.value,
+    ast.Tuple: lambda expr, *args: tuple((evaluate_ast(elt, *args) for elt in expr.elts)),
+    ast.GeneratorExp: evaluate_generatorexp,
+    ast.ListComp: evaluate_listcomp,
+    ast.DictComp: evaluate_dictcomp,
+    ast.SetComp: evaluate_setcomp,
+    ast.UnaryOp: evaluate_unaryop,
+    ast.Starred: lambda expr, *args: evaluate_ast(expr.value, *args),
+    ast.BoolOp: evaluate_boolop,
+    ast.Break: evaluate_break,
+    ast.Continue: evaluate_continue,
+    ast.BinOp: evaluate_binop,
+    ast.Compare: evaluate_condition,
+    ast.Lambda: evaluate_lambda,
+    ast.FunctionDef: evaluate_function_def,
+    ast.Dict: evaluate_dict,
+    ast.Expr: lambda expr, *args: evaluate_ast(expr.value, *args),
+    ast.For: evaluate_for,
+    ast.FormattedValue: evaluate_formatted_value,
+    ast.If: evaluate_if,
+    ast.JoinedStr: evaluate_joined_str,
+    ast.List: lambda expr, *args: [evaluate_ast(elt, *args) for elt in expr.elts],
+    ast.Name: evaluate_name,
+    ast.Subscript: evaluate_subscript,
+    ast.IfExp: evaluate_ifexp,
+    ast.Attribute: evaluate_attribute,
+    ast.Slice: lambda expr, *args: slice(
+        evaluate_ast(expr.lower, *args) if expr.lower is not None else None,
+        evaluate_ast(expr.upper, *args) if expr.upper is not None else None,
+        evaluate_ast(expr.step, *args) if expr.step is not None else None,
+    ),
+    ast.While: evaluate_while,
+    ast.Import: evaluate_import,
+    ast.ImportFrom: evaluate_import,
+    ast.ClassDef: evaluate_class_def,
+    ast.Try: evaluate_try,
+    ast.Raise: evaluate_raise,
+    ast.Assert: evaluate_assert,
+    ast.With: evaluate_with,
+    ast.Set: lambda expr, *args: set((evaluate_ast(elt, *args) for elt in expr.elts)),
+    ast.Return: evaluate_return,
+    ast.Pass: lambda expr, *args: None,
+    ast.Delete: evaluate_delete,
+}
+if hasattr(ast, "Index"):
+    NODE_HANDLERS[ast.Index] = lambda expr, *args: evaluate_ast(expr.value, *args)
+
+
 @safer_eval
 def evaluate_ast(
     expression: ast.AST,
@@ -1388,132 +1488,19 @@ def evaluate_ast(
             The list of modules that can be imported by the code. By default, only a few safe modules are allowed.
             If it contains "*", it will authorize any import. Use this at your own risk!
     """
-    if state.setdefault("_operations_count", {"counter": 0})["counter"] >= MAX_OPERATIONS:
+    if "_operations_count" not in state:
+        state["_operations_count"] = {"counter": 0}
+
+    if state["_operations_count"]["counter"] >= MAX_OPERATIONS:
         raise InterpreterError(
             f"Reached the max number of operations of {MAX_OPERATIONS}. Maybe there is an infinite loop somewhere in the code, or you're just asking too many calculations."
         )
     state["_operations_count"]["counter"] += 1
-    common_params = (state, static_tools, custom_tools, authorized_imports)
-    if isinstance(expression, ast.Assign):
-        # Assignment -> we evaluate the assignment which should update the state
-        # We return the variable assigned as it may be used to determine the final result.
-        return evaluate_assign(expression, *common_params)
-    elif isinstance(expression, ast.AnnAssign):
-        return evaluate_annassign(expression, *common_params)
-    elif isinstance(expression, ast.AugAssign):
-        return evaluate_augassign(expression, *common_params)
-    elif isinstance(expression, ast.Call):
-        # Function call -> we return the value of the function call
-        return evaluate_call(expression, *common_params)
-    elif isinstance(expression, ast.Constant):
-        # Constant -> just return the value
-        return expression.value
-    elif isinstance(expression, ast.Tuple):
-        return tuple((evaluate_ast(elt, *common_params) for elt in expression.elts))
-    elif isinstance(expression, ast.GeneratorExp):
-        return evaluate_generatorexp(expression, *common_params)
-    elif isinstance(expression, ast.ListComp):
-        return evaluate_listcomp(expression, *common_params)
-    elif isinstance(expression, ast.DictComp):
-        return evaluate_dictcomp(expression, *common_params)
-    elif isinstance(expression, ast.SetComp):
-        return evaluate_setcomp(expression, *common_params)
-    elif isinstance(expression, ast.UnaryOp):
-        return evaluate_unaryop(expression, *common_params)
-    elif isinstance(expression, ast.Starred):
-        return evaluate_ast(expression.value, *common_params)
-    elif isinstance(expression, ast.BoolOp):
-        # Boolean operation -> evaluate the operation
-        return evaluate_boolop(expression, *common_params)
-    elif isinstance(expression, ast.Break):
-        raise BreakException()
-    elif isinstance(expression, ast.Continue):
-        raise ContinueException()
-    elif isinstance(expression, ast.BinOp):
-        # Binary operation -> execute operation
-        return evaluate_binop(expression, *common_params)
-    elif isinstance(expression, ast.Compare):
-        # Comparison -> evaluate the comparison
-        return evaluate_condition(expression, *common_params)
-    elif isinstance(expression, ast.Lambda):
-        return evaluate_lambda(expression, *common_params)
-    elif isinstance(expression, ast.FunctionDef):
-        return evaluate_function_def(expression, *common_params)
-    elif isinstance(expression, ast.Dict):
-        # Dict -> evaluate all keys and values
-        keys = (evaluate_ast(k, *common_params) for k in expression.keys)
-        values = (evaluate_ast(v, *common_params) for v in expression.values)
-        return dict(zip(keys, values))
-    elif isinstance(expression, ast.Expr):
-        # Expression -> evaluate the content
-        return evaluate_ast(expression.value, *common_params)
-    elif isinstance(expression, ast.For):
-        # For loop -> execute the loop
-        return evaluate_for(expression, *common_params)
-    elif isinstance(expression, ast.FormattedValue):
-        # Formatted value (part of f-string) -> evaluate the content and format it
-        value = evaluate_ast(expression.value, *common_params)
-        # Early return if no format spec
-        if not expression.format_spec:
-            return value
-        # Apply format specification
-        format_spec = evaluate_ast(expression.format_spec, *common_params)
-        return format(value, format_spec)
-    elif isinstance(expression, ast.If):
-        # If -> execute the right branch
-        return evaluate_if(expression, *common_params)
-    elif hasattr(ast, "Index") and isinstance(expression, ast.Index):
-        return evaluate_ast(expression.value, *common_params)
-    elif isinstance(expression, ast.JoinedStr):
-        return "".join([str(evaluate_ast(v, *common_params)) for v in expression.values])
-    elif isinstance(expression, ast.List):
-        # List -> evaluate all elements
-        return [evaluate_ast(elt, *common_params) for elt in expression.elts]
-    elif isinstance(expression, ast.Name):
-        # Name -> pick up the value in the state
-        return evaluate_name(expression, *common_params)
-    elif isinstance(expression, ast.Subscript):
-        # Subscript -> return the value of the indexing
-        return evaluate_subscript(expression, *common_params)
-    elif isinstance(expression, ast.IfExp):
-        test_val = evaluate_ast(expression.test, *common_params)
-        if test_val:
-            return evaluate_ast(expression.body, *common_params)
-        else:
-            return evaluate_ast(expression.orelse, *common_params)
-    elif isinstance(expression, ast.Attribute):
-        return evaluate_attribute(expression, *common_params)
-    elif isinstance(expression, ast.Slice):
-        return slice(
-            evaluate_ast(expression.lower, *common_params) if expression.lower is not None else None,
-            evaluate_ast(expression.upper, *common_params) if expression.upper is not None else None,
-            evaluate_ast(expression.step, *common_params) if expression.step is not None else None,
-        )
-    elif isinstance(expression, ast.While):
-        return evaluate_while(expression, *common_params)
-    elif isinstance(expression, (ast.Import, ast.ImportFrom)):
-        return evaluate_import(expression, state, authorized_imports)
-    elif isinstance(expression, ast.ClassDef):
-        return evaluate_class_def(expression, *common_params)
-    elif isinstance(expression, ast.Try):
-        return evaluate_try(expression, *common_params)
-    elif isinstance(expression, ast.Raise):
-        return evaluate_raise(expression, *common_params)
-    elif isinstance(expression, ast.Assert):
-        return evaluate_assert(expression, *common_params)
-    elif isinstance(expression, ast.With):
-        return evaluate_with(expression, *common_params)
-    elif isinstance(expression, ast.Set):
-        return set((evaluate_ast(elt, *common_params) for elt in expression.elts))
-    elif isinstance(expression, ast.Return):
-        raise ReturnException(evaluate_ast(expression.value, *common_params) if expression.value else None)
-    elif isinstance(expression, ast.Pass):
-        return None
-    elif isinstance(expression, ast.Delete):
-        return evaluate_delete(expression, *common_params)
-    else:
-        # For now we refuse anything else. Let's add things as we need them.
-        raise InterpreterError(f"{expression.__class__.__name__} is not supported.")
+    handler = NODE_HANDLERS.get(type(expression))
+    if handler:
+        return handler(expression, state, static_tools, custom_tools, authorized_imports)
+    # For now we refuse anything else. Let's add things as we need them.
+    raise InterpreterError(f"{expression.__class__.__name__} is not supported.")
 
 
 class FinalAnswerException(Exception):
