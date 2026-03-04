@@ -78,6 +78,12 @@ def nodunder_setattr(obj, name, value):
     return setattr(obj, name, value)
 
 
+def nodunder_hasattr(obj, name):
+    if is_dunder(name):
+        return False
+    return hasattr(obj, name)
+
+
 BASE_PYTHON_TOOLS = {
     "print": custom_print,
     "isinstance": isinstance,
@@ -126,7 +132,7 @@ BASE_PYTHON_TOOLS = {
     "divmod": divmod,
     "callable": callable,
     "getattr": nodunder_getattr,
-    "hasattr": hasattr,
+    "hasattr": nodunder_hasattr,
     "setattr": nodunder_setattr,
     "issubclass": issubclass,
     "type": type,
@@ -1303,6 +1309,8 @@ def evaluate_import(expression, state, static_tools, custom_tools, authorized_im
                             state[name] = getattr(module, name)
             else:  # regular from imports
                 for alias in expression.names:
+                    if is_dunder(alias.name):
+                        raise InterpreterError(f"Forbidden import of dunder name: {alias.name}")
                     if hasattr(module, alias.name):
                         state[alias.asname or alias.name] = getattr(module, alias.name)
                     else:
