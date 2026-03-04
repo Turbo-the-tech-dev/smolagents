@@ -159,6 +159,8 @@ DANGEROUS_FUNCTIONS = [
     "posix.system",
 ]
 
+DANGEROUS_FUNCTIONS_NAMES = {func.split(".")[-1] for func in DANGEROUS_FUNCTIONS}
+
 
 def check_safer_result(result: Any, static_tools: dict[str, Callable] = None, authorized_imports: list[str] = None):
     """
@@ -181,6 +183,8 @@ def check_safer_result(result: Any, static_tools: dict[str, Callable] = None, au
         if not check_import_authorized(result["__name__"], authorized_imports):
             raise InterpreterError(f"Forbidden access to module: {result['__name__']}")
     elif isinstance(result, (FunctionType, BuiltinFunctionType)):
+        if result.__name__ not in DANGEROUS_FUNCTIONS_NAMES:
+            return
         for qualified_function_name in DANGEROUS_FUNCTIONS:
             module_name, function_name = qualified_function_name.rsplit(".", 1)
             if (
@@ -211,6 +215,8 @@ def safer_eval(func: Callable):
         authorized_imports=BASE_BUILTIN_MODULES,
     ):
         result = func(expression, state, static_tools, custom_tools, authorized_imports=authorized_imports)
+        if result is None or isinstance(result, (bool, int, float, str)):
+            return result
         check_safer_result(result, static_tools, authorized_imports)
         return result
 
