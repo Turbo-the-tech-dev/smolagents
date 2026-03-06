@@ -48,9 +48,8 @@ class GradioUITester(unittest.TestCase):
                 mock_file = Mock()
                 mock_file.name = temp_file.name
 
-                textbox, uploads_log = self.ui.upload_file(mock_file, [])
+                uploads_log = self.ui.upload_file(mock_file, [])
 
-                self.assertIn("File uploaded:", textbox.value)
                 self.assertEqual(len(uploads_log), 1)
                 self.assertTrue(os.path.exists(os.path.join(self.temp_dir, os.path.basename(temp_file.name))))
 
@@ -62,9 +61,8 @@ class GradioUITester(unittest.TestCase):
                 mock_file = Mock()
                 mock_file.name = temp_file.name
 
-                textbox, uploads_log = self.ui.upload_file(mock_file, [])
+                uploads_log = self.ui.upload_file(mock_file, [])
 
-                self.assertEqual(textbox.value, "File type disallowed")
                 self.assertEqual(len(uploads_log), 0)
 
     def test_upload_file_success(self):
@@ -73,18 +71,16 @@ class GradioUITester(unittest.TestCase):
             mock_file = Mock()
             mock_file.name = temp_file.name
 
-            textbox, uploads_log = self.ui.upload_file(mock_file, [])
+            uploads_log = self.ui.upload_file(mock_file, [])
 
-            self.assertIn("File uploaded:", textbox.value)
             self.assertEqual(len(uploads_log), 1)
             self.assertTrue(os.path.exists(os.path.join(self.temp_dir, os.path.basename(temp_file.name))))
             self.assertEqual(uploads_log[0], os.path.join(self.temp_dir, os.path.basename(temp_file.name)))
 
     def test_upload_file_none(self):
         """Test scenario when no file is selected"""
-        textbox, uploads_log = self.ui.upload_file(None, [])
+        uploads_log = self.ui.upload_file(None, [])
 
-        self.assertEqual(textbox.value, "No file uploaded")
         self.assertEqual(len(uploads_log), 0)
 
     def test_upload_file_invalid_type(self):
@@ -93,9 +89,8 @@ class GradioUITester(unittest.TestCase):
             mock_file = Mock()
             mock_file.name = temp_file.name
 
-            textbox, uploads_log = self.ui.upload_file(mock_file, [])
+            uploads_log = self.ui.upload_file(mock_file, [])
 
-            self.assertEqual(textbox.value, "File type disallowed")
             self.assertEqual(len(uploads_log), 0)
 
     def test_upload_file_special_chars(self):
@@ -109,9 +104,8 @@ class GradioUITester(unittest.TestCase):
                 mock_file.name = special_char_name
 
                 with patch("shutil.copy"):
-                    textbox, uploads_log = self.ui.upload_file(mock_file, [])
+                    uploads_log = self.ui.upload_file(mock_file, [])
 
-                    self.assertIn("File uploaded:", textbox.value)
                     self.assertEqual(len(uploads_log), 1)
                     self.assertIn("test_____", uploads_log[0])
             finally:
@@ -125,9 +119,8 @@ class GradioUITester(unittest.TestCase):
             mock_file = Mock()
             mock_file.name = temp_file.name
 
-            textbox, uploads_log = self.ui.upload_file(mock_file, [], allowed_file_types=[".csv"])
+            uploads_log = self.ui.upload_file(mock_file, [], allowed_file_types=[".csv"])
 
-            self.assertIn("File uploaded:", textbox.value)
             self.assertEqual(len(uploads_log), 1)
 
 
@@ -361,8 +354,14 @@ class TestPullMessagesFromStep:
 
     def test_final_answer_step_audio(self):
         """Test FinalAnswerStep with audio answer."""
-        with patch.object(AgentAudio, "to_string", return_value="path/to/audio.wav"):
-            step = FinalAnswerStep(output=AgentAudio("path/to/audio.wav"))
+        # Mock AgentAudio entirely for this test to avoid dependency issues
+        # We use a dummy class to represent AgentAudio for isinstance checks
+        class DummyAgentAudio:
+            def to_string(self):
+                return "path/to/audio.wav"
+
+        with patch("smolagents.gradio_ui.AgentAudio", DummyAgentAudio):
+            step = FinalAnswerStep(output=DummyAgentAudio())
             messages = list(pull_messages_from_step(step))
             assert len(messages) == 1
             assert messages[0].content["path"] == "path/to/audio.wav"
