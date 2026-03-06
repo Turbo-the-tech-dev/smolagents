@@ -201,32 +201,6 @@ def check_safer_result(result: Any, static_tools: dict[str, Callable] = None, au
                 raise InterpreterError(f"Forbidden access to function: {function_name}")
 
 
-def safer_eval(func: Callable):
-    """
-    Decorator to enhance the security of an evaluation function by checking its return value.
-
-    Args:
-        func (Callable): Evaluation function to be made safer.
-
-    Returns:
-        Callable: Safer evaluation function with return value check.
-    """
-
-    @wraps(func)
-    def _check_return(
-        expression,
-        state,
-        static_tools,
-        custom_tools,
-        authorized_imports=BASE_BUILTIN_MODULES,
-    ):
-        result = func(expression, state, static_tools, custom_tools, authorized_imports=authorized_imports)
-        if result is None or isinstance(result, (bool, int, float, str)):
-            return result
-        check_safer_result(result, static_tools, authorized_imports)
-        return result
-
-    return _check_return
 
 
 def safer_func(
@@ -1451,14 +1425,14 @@ NODE_HANDLERS = {
     ast.AnnAssign: evaluate_annassign,
     ast.AugAssign: evaluate_augassign,
     ast.Call: evaluate_call,
-    ast.Constant: lambda expr, *args: expr.value,
-    ast.Tuple: lambda expr, *args: tuple((evaluate_ast(elt, *args) for elt in expr.elts)),
+    ast.Constant: lambda expr, state, st, ct, ai: expr.value,
+    ast.Tuple: lambda expr, state, st, ct, ai: tuple((evaluate_ast(elt, state, st, ct, ai) for elt in expr.elts)),
     ast.GeneratorExp: evaluate_generatorexp,
     ast.ListComp: evaluate_listcomp,
     ast.DictComp: evaluate_dictcomp,
     ast.SetComp: evaluate_setcomp,
     ast.UnaryOp: evaluate_unaryop,
-    ast.Starred: lambda expr, *args: evaluate_ast(expr.value, *args),
+    ast.Starred: lambda expr, state, st, ct, ai: evaluate_ast(expr.value, state, st, ct, ai),
     ast.BoolOp: evaluate_boolop,
     ast.Break: evaluate_break,
     ast.Continue: evaluate_continue,
@@ -1467,20 +1441,20 @@ NODE_HANDLERS = {
     ast.Lambda: evaluate_lambda,
     ast.FunctionDef: evaluate_function_def,
     ast.Dict: evaluate_dict,
-    ast.Expr: lambda expr, *args: evaluate_ast(expr.value, *args),
+    ast.Expr: lambda expr, state, st, ct, ai: evaluate_ast(expr.value, state, st, ct, ai),
     ast.For: evaluate_for,
     ast.FormattedValue: evaluate_formatted_value,
     ast.If: evaluate_if,
     ast.JoinedStr: evaluate_joined_str,
-    ast.List: lambda expr, *args: [evaluate_ast(elt, *args) for elt in expr.elts],
+    ast.List: lambda expr, state, st, ct, ai: [evaluate_ast(elt, state, st, ct, ai) for elt in expr.elts],
     ast.Name: evaluate_name,
     ast.Subscript: evaluate_subscript,
     ast.IfExp: evaluate_ifexp,
     ast.Attribute: evaluate_attribute,
-    ast.Slice: lambda expr, *args: slice(
-        evaluate_ast(expr.lower, *args) if expr.lower is not None else None,
-        evaluate_ast(expr.upper, *args) if expr.upper is not None else None,
-        evaluate_ast(expr.step, *args) if expr.step is not None else None,
+    ast.Slice: lambda expr, state, st, ct, ai: slice(
+        evaluate_ast(expr.lower, state, st, ct, ai) if expr.lower is not None else None,
+        evaluate_ast(expr.upper, state, st, ct, ai) if expr.upper is not None else None,
+        evaluate_ast(expr.step, state, st, ct, ai) if expr.step is not None else None,
     ),
     ast.While: evaluate_while,
     ast.Import: evaluate_import,
@@ -1490,16 +1464,15 @@ NODE_HANDLERS = {
     ast.Raise: evaluate_raise,
     ast.Assert: evaluate_assert,
     ast.With: evaluate_with,
-    ast.Set: lambda expr, *args: set((evaluate_ast(elt, *args) for elt in expr.elts)),
+    ast.Set: lambda expr, state, st, ct, ai: set((evaluate_ast(elt, state, st, ct, ai) for elt in expr.elts)),
     ast.Return: evaluate_return,
-    ast.Pass: lambda expr, *args: None,
+    ast.Pass: lambda expr, state, st, ct, ai: None,
     ast.Delete: evaluate_delete,
 }
 if hasattr(ast, "Index"):
-    NODE_HANDLERS[ast.Index] = lambda expr, *args: evaluate_ast(expr.value, *args)
+    NODE_HANDLERS[ast.Index] = lambda expr, state, st, ct, ai: evaluate_ast(expr.value, state, st, ct, ai)
 
 
-@safer_eval
 def evaluate_ast(
     expression: ast.AST,
     state: dict[str, Any],
@@ -1527,17 +1500,27 @@ def evaluate_ast(
             The list of modules that can be imported by the code. By default, only a few safe modules are allowed.
             If it contains "*", it will authorize any import. Use this at your own risk!
     """
-    if "_operations_count" not in state:
+    # Optimized operations counter: assuming it's already initialized in evaluate_python_code
+    ops_counter = state.get("_operations_count")
+    if ops_counter is None:
         state["_operations_count"] = {"counter": 0}
+        ops_counter = state["_operations_count"]
 
-    if state["_operations_count"]["counter"] >= MAX_OPERATIONS:
+    if ops_counter["counter"] >= MAX_OPERATIONS:
         raise InterpreterError(
             f"Reached the max number of operations of {MAX_OPERATIONS}. Maybe there is an infinite loop somewhere in the code, or you're just asking too many calculations."
         )
-    state["_operations_count"]["counter"] += 1
+    ops_counter["counter"] += 1
+
     handler = NODE_HANDLERS.get(type(expression))
     if handler:
-        return handler(expression, state, static_tools, custom_tools, authorized_imports)
+        result = handler(expression, state, static_tools, custom_tools, authorized_imports)
+        # Inlined safer_eval logic for performance
+        if result is None or isinstance(result, (bool, int, float, str)):
+            return result
+        check_safer_result(result, static_tools, authorized_imports)
+        return result
+
     # For now we refuse anything else. Let's add things as we need them.
     raise InterpreterError(f"{expression.__class__.__name__} is not supported.")
 
