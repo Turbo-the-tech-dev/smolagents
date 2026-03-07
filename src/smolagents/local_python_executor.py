@@ -201,34 +201,6 @@ def check_safer_result(result: Any, static_tools: dict[str, Callable] = None, au
                 raise InterpreterError(f"Forbidden access to function: {function_name}")
 
 
-def safer_eval(func: Callable):
-    """
-    Decorator to enhance the security of an evaluation function by checking its return value.
-
-    Args:
-        func (Callable): Evaluation function to be made safer.
-
-    Returns:
-        Callable: Safer evaluation function with return value check.
-    """
-
-    @wraps(func)
-    def _check_return(
-        expression,
-        state,
-        static_tools,
-        custom_tools,
-        authorized_imports=BASE_BUILTIN_MODULES,
-    ):
-        result = func(expression, state, static_tools, custom_tools, authorized_imports=authorized_imports)
-        if result is None or isinstance(result, (bool, int, float, str)):
-            return result
-        check_safer_result(result, static_tools, authorized_imports)
-        return result
-
-    return _check_return
-
-
 def safer_func(
     func: Callable,
     static_tools: dict[str, Callable] = BASE_PYTHON_TOOLS,
@@ -1499,7 +1471,6 @@ if hasattr(ast, "Index"):
     NODE_HANDLERS[ast.Index] = lambda expr, *args: evaluate_ast(expr.value, *args)
 
 
-@safer_eval
 def evaluate_ast(
     expression: ast.AST,
     state: dict[str, Any],
@@ -1527,17 +1498,24 @@ def evaluate_ast(
             The list of modules that can be imported by the code. By default, only a few safe modules are allowed.
             If it contains "*", it will authorize any import. Use this at your own risk!
     """
-    if "_operations_count" not in state:
-        state["_operations_count"] = {"counter": 0}
+    try:
+        ops_count = state["_operations_count"]
+    except KeyError:
+        ops_count = {"counter": 0}
+        state["_operations_count"] = ops_count
 
-    if state["_operations_count"]["counter"] >= MAX_OPERATIONS:
+    if ops_count["counter"] >= MAX_OPERATIONS:
         raise InterpreterError(
             f"Reached the max number of operations of {MAX_OPERATIONS}. Maybe there is an infinite loop somewhere in the code, or you're just asking too many calculations."
         )
-    state["_operations_count"]["counter"] += 1
+    ops_count["counter"] += 1
     handler = NODE_HANDLERS.get(type(expression))
     if handler:
-        return handler(expression, state, static_tools, custom_tools, authorized_imports)
+        result = handler(expression, state, static_tools, custom_tools, authorized_imports)
+        if result is None or isinstance(result, (bool, int, float, str)):
+            return result
+        check_safer_result(result, static_tools, authorized_imports)
+        return result
     # For now we refuse anything else. Let's add things as we need them.
     raise InterpreterError(f"{expression.__class__.__name__} is not supported.")
 
