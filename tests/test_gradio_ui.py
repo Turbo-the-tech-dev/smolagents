@@ -40,7 +40,8 @@ class GradioUITester(unittest.TestCase):
         """Clean up test environment"""
         shutil.rmtree(self.temp_dir)
 
-    def test_upload_file_default_types(self):
+    @patch("gradio.Info")
+    def test_upload_file_default_types(self, mock_info):
         """Test default allowed file types"""
         default_types = [".pdf", ".docx", ".txt"]
         for file_type in default_types:
@@ -48,13 +49,14 @@ class GradioUITester(unittest.TestCase):
                 mock_file = Mock()
                 mock_file.name = temp_file.name
 
-                textbox, uploads_log = self.ui.upload_file(mock_file, [])
+                uploads_log = self.ui.upload_file(mock_file, [])
 
-                self.assertIn("File uploaded:", textbox.value)
+                mock_info.assert_called()
                 self.assertEqual(len(uploads_log), 1)
                 self.assertTrue(os.path.exists(os.path.join(self.temp_dir, os.path.basename(temp_file.name))))
 
-    def test_upload_file_default_types_disallowed(self):
+    @patch("gradio.Warning")
+    def test_upload_file_default_types_disallowed(self, mock_warning):
         """Test default disallowed file types"""
         disallowed_types = [".exe", ".sh", ".py", ".jpg"]
         for file_type in disallowed_types:
@@ -62,43 +64,45 @@ class GradioUITester(unittest.TestCase):
                 mock_file = Mock()
                 mock_file.name = temp_file.name
 
-                textbox, uploads_log = self.ui.upload_file(mock_file, [])
+                uploads_log = self.ui.upload_file(mock_file, [])
 
-                self.assertEqual(textbox.value, "File type disallowed")
+                mock_warning.assert_called()
                 self.assertEqual(len(uploads_log), 0)
 
-    def test_upload_file_success(self):
+    @patch("gradio.Info")
+    def test_upload_file_success(self, mock_info):
         """Test successful file upload scenario"""
         with tempfile.NamedTemporaryFile(suffix=".txt") as temp_file:
             mock_file = Mock()
             mock_file.name = temp_file.name
 
-            textbox, uploads_log = self.ui.upload_file(mock_file, [])
+            uploads_log = self.ui.upload_file(mock_file, [])
 
-            self.assertIn("File uploaded:", textbox.value)
+            mock_info.assert_called()
             self.assertEqual(len(uploads_log), 1)
             self.assertTrue(os.path.exists(os.path.join(self.temp_dir, os.path.basename(temp_file.name))))
             self.assertEqual(uploads_log[0], os.path.join(self.temp_dir, os.path.basename(temp_file.name)))
 
     def test_upload_file_none(self):
         """Test scenario when no file is selected"""
-        textbox, uploads_log = self.ui.upload_file(None, [])
+        uploads_log = self.ui.upload_file(None, [])
 
-        self.assertEqual(textbox.value, "No file uploaded")
         self.assertEqual(len(uploads_log), 0)
 
-    def test_upload_file_invalid_type(self):
+    @patch("gradio.Warning")
+    def test_upload_file_invalid_type(self, mock_warning):
         """Test disallowed file type"""
         with tempfile.NamedTemporaryFile(suffix=".exe") as temp_file:
             mock_file = Mock()
             mock_file.name = temp_file.name
 
-            textbox, uploads_log = self.ui.upload_file(mock_file, [])
+            uploads_log = self.ui.upload_file(mock_file, [])
 
-            self.assertEqual(textbox.value, "File type disallowed")
+            mock_warning.assert_called()
             self.assertEqual(len(uploads_log), 0)
 
-    def test_upload_file_special_chars(self):
+    @patch("gradio.Info")
+    def test_upload_file_special_chars(self, mock_info):
         """Test scenario with special characters in filename"""
         with tempfile.NamedTemporaryFile(suffix=".txt") as temp_file:
             # Create a new temporary file with special characters
@@ -109,9 +113,9 @@ class GradioUITester(unittest.TestCase):
                 mock_file.name = special_char_name
 
                 with patch("shutil.copy"):
-                    textbox, uploads_log = self.ui.upload_file(mock_file, [])
+                    uploads_log = self.ui.upload_file(mock_file, [])
 
-                    self.assertIn("File uploaded:", textbox.value)
+                    mock_info.assert_called()
                     self.assertEqual(len(uploads_log), 1)
                     self.assertIn("test_____", uploads_log[0])
             finally:
@@ -119,15 +123,16 @@ class GradioUITester(unittest.TestCase):
                 if os.path.exists(special_char_name):
                     os.remove(special_char_name)
 
-    def test_upload_file_custom_types(self):
+    @patch("gradio.Info")
+    def test_upload_file_custom_types(self, mock_info):
         """Test custom allowed file types"""
         with tempfile.NamedTemporaryFile(suffix=".csv") as temp_file:
             mock_file = Mock()
             mock_file.name = temp_file.name
 
-            textbox, uploads_log = self.ui.upload_file(mock_file, [], allowed_file_types=[".csv"])
+            uploads_log = self.ui.upload_file(mock_file, [], allowed_file_types=[".csv"])
 
-            self.assertIn("File uploaded:", textbox.value)
+            mock_info.assert_called()
             self.assertEqual(len(uploads_log), 1)
 
 
