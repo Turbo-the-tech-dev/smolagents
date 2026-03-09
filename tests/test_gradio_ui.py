@@ -361,8 +361,13 @@ class TestPullMessagesFromStep:
 
     def test_final_answer_step_audio(self):
         """Test FinalAnswerStep with audio answer."""
-        with patch.object(AgentAudio, "to_string", return_value="path/to/audio.wav"):
-            step = FinalAnswerStep(output=AgentAudio("path/to/audio.wav"))
+        mock_audio = Mock()
+        mock_audio.to_string.return_value = "path/to/audio.wav"
+
+        # Patch isinstance to return True for our mock when checked against AgentAudio
+        # This avoids needing torch/soundfile dependencies in this test
+        with patch("smolagents.gradio_ui.isinstance", side_effect=lambda x, y: True if y == AgentAudio and x == mock_audio else isinstance(x, y)):
+            step = FinalAnswerStep(output=mock_audio)
             messages = list(pull_messages_from_step(step))
             assert len(messages) == 1
             assert messages[0].content["path"] == "path/to/audio.wav"
