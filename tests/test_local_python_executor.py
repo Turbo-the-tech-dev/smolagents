@@ -48,8 +48,8 @@ def add_two(x):
 
 class TestEvaluatePythonCode:
     def assertDictEqualNoPrint(self, dict1, dict2):
-        assert {k: v for k, v in dict1.items() if k != "_print_outputs"} == {
-            k: v for k, v in dict2.items() if k != "_print_outputs"
+        assert {k: v for k, v in dict1.items() if k != "__print_outputs__"} == {
+            k: v for k, v in dict2.items() if k != "__print_outputs__"
         }
 
     def test_evaluate_assign(self):
@@ -57,14 +57,14 @@ class TestEvaluatePythonCode:
         state = {}
         result, _ = evaluate_python_code(code, {}, state=state)
         assert result == 3
-        self.assertDictEqualNoPrint(state, {"x": 3, "_operations_count": {"counter": 2}})
+        self.assertDictEqualNoPrint(state, {"x": 3, "__operations_count__": {"counter": 2}})
 
         code = "x = y"
         state = {"y": 5}
         result, _ = evaluate_python_code(code, {}, state=state)
         # evaluate returns the value of the last assignment.
         assert result == 5
-        self.assertDictEqualNoPrint(state, {"x": 5, "y": 5, "_operations_count": {"counter": 2}})
+        self.assertDictEqualNoPrint(state, {"x": 5, "y": 5, "__operations_count__": {"counter": 2}})
 
         code = "a=1;b=None"
         result, _ = evaluate_python_code(code, {}, state={})
@@ -90,7 +90,7 @@ class TestEvaluatePythonCode:
         state = {"x": 3}
         result, _ = evaluate_python_code(code, {"add_two": add_two}, state=state)
         assert result == 5
-        self.assertDictEqualNoPrint(state, {"x": 3, "y": 5, "_operations_count": {"counter": 3}})
+        self.assertDictEqualNoPrint(state, {"x": 3, "y": 5, "__operations_count__": {"counter": 3}})
 
         # Should not work without the tool
         with pytest.raises(InterpreterError, match="Forbidden function evaluation: 'add_two'"):
@@ -249,7 +249,7 @@ test_func(**None)
         state = {}
         result, _ = evaluate_python_code(code, {}, state=state)
         assert result == 3
-        self.assertDictEqualNoPrint(state, {"x": 3, "_operations_count": {"counter": 2}})
+        self.assertDictEqualNoPrint(state, {"x": 3, "__operations_count__": {"counter": 2}})
 
     def test_evaluate_dict(self):
         code = "test_dict = {'x': x, 'y': add_two(x)}"
@@ -257,7 +257,7 @@ test_func(**None)
         result, _ = evaluate_python_code(code, {"add_two": add_two}, state=state)
         assert result == {"x": 3, "y": 5}
         self.assertDictEqualNoPrint(
-            state, {"x": 3, "test_dict": {"x": 3, "y": 5}, "_operations_count": {"counter": 7}}
+            state, {"x": 3, "test_dict": {"x": 3, "y": 5}, "__operations_count__": {"counter": 7}}
         )
 
     def test_evaluate_expression(self):
@@ -266,7 +266,7 @@ test_func(**None)
         result, _ = evaluate_python_code(code, {}, state=state)
         # evaluate returns the value of the last assignment.
         assert result == 5
-        self.assertDictEqualNoPrint(state, {"x": 3, "y": 5, "_operations_count": {"counter": 4}})
+        self.assertDictEqualNoPrint(state, {"x": 3, "y": 5, "__operations_count__": {"counter": 4}})
 
     def test_evaluate_f_string(self):
         code = "text = f'This is x: {x}.'"
@@ -274,7 +274,7 @@ test_func(**None)
         result, _ = evaluate_python_code(code, {}, state=state)
         # evaluate returns the value of the last assignment.
         assert result == "This is x: 3."
-        self.assertDictEqualNoPrint(state, {"x": 3, "text": "This is x: 3.", "_operations_count": {"counter": 6}})
+        self.assertDictEqualNoPrint(state, {"x": 3, "text": "This is x: 3.", "__operations_count__": {"counter": 6}})
 
     def test_evaluate_f_string_with_format(self):
         code = "text = f'This is x: {x:.2f}.'"
@@ -282,7 +282,7 @@ test_func(**None)
         result, _ = evaluate_python_code(code, {}, state=state)
         assert result == "This is x: 3.34."
         self.assertDictEqualNoPrint(
-            state, {"x": 3.336, "text": "This is x: 3.34.", "_operations_count": {"counter": 8}}
+            state, {"x": 3.336, "text": "This is x: 3.34.", "__operations_count__": {"counter": 8}}
         )
 
     def test_evaluate_f_string_with_complex_format(self):
@@ -297,7 +297,7 @@ test_func(**None)
                 "width": 10,
                 "precision": 2,
                 "text": "This is x:       3.34.",
-                "_operations_count": {"counter": 14},
+                "__operations_count__": {"counter": 14},
             },
         )
 
@@ -307,41 +307,41 @@ test_func(**None)
         result, _ = evaluate_python_code(code, {}, state=state)
         # evaluate returns the value of the last assignment.
         assert result == 2
-        self.assertDictEqualNoPrint(state, {"x": 3, "y": 2, "_operations_count": {"counter": 6}})
+        self.assertDictEqualNoPrint(state, {"x": 3, "y": 2, "__operations_count__": {"counter": 6}})
 
         state = {"x": 8}
         result, _ = evaluate_python_code(code, {}, state=state)
         # evaluate returns the value of the last assignment.
         assert result == 5
-        self.assertDictEqualNoPrint(state, {"x": 8, "y": 5, "_operations_count": {"counter": 6}})
+        self.assertDictEqualNoPrint(state, {"x": 8, "y": 5, "__operations_count__": {"counter": 6}})
 
     def test_evaluate_list(self):
         code = "test_list = [x, add_two(x)]"
         state = {"x": 3}
         result, _ = evaluate_python_code(code, {"add_two": add_two}, state=state)
         assert result == [3, 5]
-        self.assertDictEqualNoPrint(state, {"x": 3, "test_list": [3, 5], "_operations_count": {"counter": 5}})
+        self.assertDictEqualNoPrint(state, {"x": 3, "test_list": [3, 5], "__operations_count__": {"counter": 5}})
 
     def test_evaluate_name(self):
         code = "y = x"
         state = {"x": 3}
         result, _ = evaluate_python_code(code, {}, state=state)
         assert result == 3
-        self.assertDictEqualNoPrint(state, {"x": 3, "y": 3, "_operations_count": {"counter": 2}})
+        self.assertDictEqualNoPrint(state, {"x": 3, "y": 3, "__operations_count__": {"counter": 2}})
 
     def test_evaluate_subscript(self):
         code = "test_list = [x, add_two(x)]\ntest_list[1]"
         state = {"x": 3}
         result, _ = evaluate_python_code(code, {"add_two": add_two}, state=state)
         assert result == 5
-        self.assertDictEqualNoPrint(state, {"x": 3, "test_list": [3, 5], "_operations_count": {"counter": 9}})
+        self.assertDictEqualNoPrint(state, {"x": 3, "test_list": [3, 5], "__operations_count__": {"counter": 9}})
 
         code = "test_dict = {'x': x, 'y': add_two(x)}\ntest_dict['y']"
         state = {"x": 3}
         result, _ = evaluate_python_code(code, {"add_two": add_two}, state=state)
         assert result == 5
         self.assertDictEqualNoPrint(
-            state, {"x": 3, "test_dict": {"x": 3, "y": 5}, "_operations_count": {"counter": 11}}
+            state, {"x": 3, "test_dict": {"x": 3, "y": 5}, "__operations_count__": {"counter": 11}}
         )
 
         code = "vendor = {'revenue': 31000, 'rent': 50312}; vendor['ratio'] = round(vendor['revenue'] / vendor['rent'], 2)"
@@ -366,14 +366,14 @@ for result in search_results:
         state = {}
         result, _ = evaluate_python_code(code, {"range": range}, state=state)
         assert result == 2
-        self.assertDictEqualNoPrint(state, {"x": 2, "i": 2, "_operations_count": {"counter": 11}})
+        self.assertDictEqualNoPrint(state, {"x": 2, "i": 2, "__operations_count__": {"counter": 11}})
 
     def test_evaluate_binop(self):
         code = "y + x"
         state = {"x": 3, "y": 6}
         result, _ = evaluate_python_code(code, {}, state=state)
         assert result == 9
-        self.assertDictEqualNoPrint(state, {"x": 3, "y": 6, "_operations_count": {"counter": 4}})
+        self.assertDictEqualNoPrint(state, {"x": 3, "y": 6, "__operations_count__": {"counter": 4}})
 
     def test_recursive_function(self):
         code = """
@@ -416,7 +416,7 @@ recur_fibo(6)"""
         )
         state = {}
         evaluate_python_code(code, {"range": range}, state=state)
-        assert state["_operations_count"]["counter"] == 5
+        assert state["__operations_count__"]["counter"] == 5
 
     def test_evaluate_string_methods(self):
         code = "'hello'.replace('h', 'o').split('e')"
@@ -713,7 +713,7 @@ if char.isalpha():
     print('2')"""
         state = {}
         evaluate_python_code(code, BASE_PYTHON_TOOLS, state=state)
-        assert state["_print_outputs"].value == "2\n"
+        assert state["__print_outputs__"].value == "2\n"
 
     def test_imports(self):
         code = "import math\nmath.sqrt(4)"
@@ -805,7 +805,7 @@ if char.isalpha():
         state = {}
         result, _ = evaluate_python_code(code, BASE_PYTHON_TOOLS, state=state)
         assert result is None
-        assert state["_print_outputs"].value == "Hello world!\nOk no one cares\n"
+        assert state["__print_outputs__"].value == "Hello world!\nOk no one cares\n"
 
         # Test print in function (state copy)
         code = """
@@ -815,7 +815,7 @@ def function():
 function()"""
         state = {}
         evaluate_python_code(code, {"print": print}, state=state)
-        assert state["_print_outputs"].value == "1\n2\n"
+        assert state["__print_outputs__"].value == "1\n2\n"
 
         # Test print in list comprehension (state copy)
         code = """
@@ -825,7 +825,7 @@ def function():
 [function() for i in range(10)]"""
         state = {}
         evaluate_python_code(code, {"print": print, "range": range}, state=state)
-        assert state["_print_outputs"].value == "1\n2\n2\n2\n2\n2\n2\n2\n2\n2\n2\n"
+        assert state["__print_outputs__"].value == "1\n2\n2\n2\n2\n2\n2\n2\n2\n2\n2\n"
 
     def test_tuple_target_in_iterator(self):
         code = "for a, b in [('Ralf Weikert', 'Austria'), ('Samuel Seungwon Lee', 'South Korea')]:res = a.split()[0]"
@@ -947,7 +947,7 @@ except ValueError as e:
         code = "print(min([1, 2, 3]))"
         state = {}
         evaluate_python_code(code, {"min": min, "print": print}, state=state)
-        assert state["_print_outputs"].value == "1\n"
+        assert state["__print_outputs__"].value == "1\n"
 
     def test_types_as_objects(self):
         code = "type_a = float(2); type_b = str; type_c = int"
@@ -1655,7 +1655,7 @@ class TestEvaluateDelete:
             assert str(expectation) in str(exception_info.value)
         else:
             evaluate_delete(delete_node, state, {}, {}, [])
-            _ = state.pop("_operations_count", None)
+            _ = state.pop("__operations_count__", None)
             assert state == expectation
 
 
@@ -2661,3 +2661,51 @@ class TestLocalPythonExecutorSecurity:
         )
         with expectation:
             executor(code)
+
+class TestLocalPythonExecutorDunderSecurity:
+    @pytest.mark.parametrize(
+        "code, expected_error",
+        [
+            ("__builtins__ = 'hacked'", "Forbidden assignment to dunder name: __builtins__"),
+            ("import math as __hacked__", "Forbidden import of dunder name: __hacked__"),
+            ("from math import sqrt as __hacked_sqrt__", "Forbidden import of dunder name: __hacked_sqrt__"),
+            ("del __name__", "Forbidden deletion of dunder name: __name__"),
+            ("def __hacked_func__(): pass", "Forbidden definition of dunder function: __hacked_func__"),
+            ("class __HackedClass__: pass", "Forbidden definition of dunder class: __HackedClass__"),
+            ("try: 1/0\nexcept Exception as __e__: pass", "Forbidden assignment to dunder name: __e__"),
+            ("for __i__ in range(1): pass", "Forbidden assignment to dunder name: __i__"),
+            ("[x for __x__ in range(1)]", "Forbidden assignment to dunder name: __x__"),
+            ("__operations_count__['counter'] = -1000", "Forbidden access to dunder name: __operations_count__"),
+        ],
+    )
+    def test_dunder_name_protection(self, code, expected_error):
+        executor = LocalPythonExecutor(additional_authorized_imports=["math"])
+        executor.send_tools(BASE_PYTHON_TOOLS)
+        with pytest.raises(InterpreterError) as excinfo:
+            executor(code)
+        assert expected_error in str(excinfo.value)
+
+    def test_allowed_dunder_methods(self):
+        code = dedent("""
+            class MyClass:
+                def __init__(self, x):
+                    self.x = x
+                def __str__(self):
+                    return f"MyClass(x={self.x})"
+
+            obj = MyClass(10)
+            result = str(obj)
+        """)
+        executor = LocalPythonExecutor([])
+        executor.send_tools(BASE_PYTHON_TOOLS)
+        result = executor(code).output
+        assert result == "MyClass(x=10)"
+
+    def test_star_import_dunder_filtering(self):
+        code = "from math import *"
+        executor = LocalPythonExecutor(additional_authorized_imports=["math"])
+        executor.send_tools(BASE_PYTHON_TOOLS)
+        executor(code)
+        # Check that no dunders were imported except the ones we expect or none at all
+        dunders = [k for k in executor.state.keys() if k.startswith("__") and k.endswith("__") and k not in ["__name__", "__operations_count__", "__print_outputs__"]]
+        assert not dunders

@@ -1714,8 +1714,8 @@ class CodeAgent(MultiStepAgent):
                 ]
             observation = "Execution logs:\n" + code_output.logs
         except Exception as e:
-            if hasattr(self.python_executor, "state") and "_print_outputs" in self.python_executor.state:
-                execution_logs = str(self.python_executor.state["_print_outputs"])
+            if hasattr(self.python_executor, "state") and "__print_outputs__" in self.python_executor.state:
+                execution_logs = str(self.python_executor.state["__print_outputs__"])
                 if len(execution_logs) > 0:
                     execution_outputs_console = [
                         Text("Execution logs:", style="bold"),
