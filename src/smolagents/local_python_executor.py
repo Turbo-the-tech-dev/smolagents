@@ -55,7 +55,54 @@ ERRORS = {
 DEFAULT_MAX_LEN_OUTPUT = 50000
 MAX_OPERATIONS = 10000000
 MAX_WHILE_ITERATIONS = 1000000
-ALLOWED_DUNDER_METHODS = ["__init__", "__str__", "__repr__"]
+ALLOWED_DUNDER_METHODS = [
+    "__init__",
+    "__str__",
+    "__repr__",
+    "__enter__",
+    "__exit__",
+    "__getitem__",
+    "__setitem__",
+    "__delitem__",
+    "__len__",
+    "__contains__",
+    "__iter__",
+    "__next__",
+    "__eq__",
+    "__ne__",
+    "__lt__",
+    "__le__",
+    "__gt__",
+    "__ge__",
+    "__add__",
+    "__sub__",
+    "__mul__",
+    "__truediv__",
+    "__floordiv__",
+    "__mod__",
+    "__pow__",
+    "__and__",
+    "__or__",
+    "__xor__",
+    "__lshift__",
+    "__rshift__",
+    "__neg__",
+    "__pos__",
+    "__abs__",
+    "__invert__",
+    "__iadd__",
+    "__isub__",
+    "__imul__",
+    "__itruediv__",
+    "__ifloordiv__",
+    "__imod__",
+    "__ipow__",
+    "__iand__",
+    "__ior__",
+    "__ixor__",
+    "__ilshift__",
+    "__irshift__",
+]
 
 
 def custom_print(*args):
@@ -64,6 +111,11 @@ def custom_print(*args):
 
 def is_dunder(name):
     return name.startswith("__") and name.endswith("__")
+
+
+def check_dunder_name(name):
+    if is_dunder(name) and name not in ALLOWED_DUNDER_METHODS:
+        raise InterpreterError(f"Forbidden access to dunder name: {name}")
 
 
 def nodunder_getattr(obj, name, default=None):
@@ -398,6 +450,15 @@ def evaluate_lambda(
     custom_tools: dict[str, Callable],
     authorized_imports: list[str],
 ) -> Callable:
+    for arg in lambda_expression.args.args:
+        check_dunder_name(arg.arg)
+    if lambda_expression.args.vararg:
+        check_dunder_name(lambda_expression.args.vararg.arg)
+    if lambda_expression.args.kwarg:
+        check_dunder_name(lambda_expression.args.kwarg.arg)
+    for arg in lambda_expression.args.kwonlyargs:
+        check_dunder_name(arg.arg)
+
     args = [arg.arg for arg in lambda_expression.args.args]
 
     def lambda_func(*values: Any) -> Any:
@@ -444,10 +505,20 @@ def create_function(
     custom_tools: dict[str, Callable],
     authorized_imports: list[str],
 ) -> Callable:
+    for arg in func_def.args.args:
+        check_dunder_name(arg.arg)
+    if func_def.args.vararg:
+        check_dunder_name(func_def.args.vararg.arg)
+    if func_def.args.kwarg:
+        check_dunder_name(func_def.args.kwarg.arg)
+    for arg in func_def.args.kwonlyargs:
+        check_dunder_name(arg.arg)
+
     source_code = ast.unparse(func_def)
 
     def new_func(*args: Any, **kwargs: Any) -> Any:
         func_state = state.copy()
+
         arg_names = [arg.arg for arg in func_def.args.args]
         default_values = [
             evaluate_ast(d, state, static_tools, custom_tools, authorized_imports) for d in func_def.args.defaults
@@ -511,6 +582,7 @@ def evaluate_function_def(
     custom_tools: dict[str, Callable],
     authorized_imports: list[str],
 ) -> Callable:
+    check_dunder_name(func_def.name)
     custom_tools[func_def.name] = create_function(func_def, state, static_tools, custom_tools, authorized_imports)
     return custom_tools[func_def.name]
 
@@ -523,6 +595,7 @@ def evaluate_class_def(
     authorized_imports: list[str],
 ) -> type:
     class_name = class_def.name
+    check_dunder_name(class_name)
     bases = [evaluate_ast(base, state, static_tools, custom_tools, authorized_imports) for base in class_def.bases]
 
     # Determine the metaclass to use
@@ -784,6 +857,7 @@ def set_value(
     if isinstance(target, ast.Name):
         if target.id in static_tools:
             raise InterpreterError(f"Cannot assign to name '{target.id}': doing this would erase the existing tool!")
+        check_dunder_name(target.id)
         state[target.id] = value
     elif isinstance(target, ast.Tuple):
         if not isinstance(value, tuple):
@@ -884,7 +958,7 @@ def evaluate_call(
         else:
             raise InterpreterError("super() takes at most 2 arguments")
     elif func_name == "print":
-        state["_print_outputs"] += " ".join(map(str, args)) + "\n"
+        state["__print_outputs__"] += " ".join(map(str, args)) + "\n"
         return None
     else:  # Assume it's a callable object
         if (inspect.getmodule(func) == builtins) and inspect.isbuiltin(func) and (func not in static_tools.values()):
@@ -929,6 +1003,8 @@ def evaluate_name(
     custom_tools: dict[str, Callable],
     authorized_imports: list[str],
 ) -> Any:
+    if is_dunder(name.id) and name.id != "__name__":
+        raise InterpreterError(f"Forbidden access to dunder name: {name.id}")
     if name.id in state:
         return state[name.id]
     elif name.id in static_tools:
@@ -1007,6 +1083,14 @@ def evaluate_if(
     return result
 
 
+def check_dunder_target(target):
+    if isinstance(target, ast.Name):
+        check_dunder_name(target.id)
+    elif isinstance(target, (ast.Tuple, ast.List)):
+        for elt in target.elts:
+            check_dunder_target(elt)
+
+
 def evaluate_for(
     for_loop: ast.For,
     state: dict[str, Any],
@@ -1014,6 +1098,7 @@ def evaluate_for(
     custom_tools: dict[str, Callable],
     authorized_imports: list[str],
 ) -> Any:
+    check_dunder_target(for_loop.target)
     result = None
     iterator = evaluate_ast(for_loop.iter, state, static_tools, custom_tools, authorized_imports)
     for counter in iterator:
@@ -1067,6 +1152,7 @@ def _evaluate_comprehensions(
     comprehension = comprehensions[0]
     iter_value = evaluate_ast(comprehension.iter, state, static_tools, custom_tools, authorized_imports)
     for value in iter_value:
+        check_dunder_target(comprehension.target)
         new_state = state.copy()
         set_value(comprehension.target, value, new_state, static_tools, custom_tools, authorized_imports)
         # Check all filter conditions
@@ -1159,6 +1245,7 @@ def evaluate_try(
             ):
                 matched = True
                 if handler.name:
+                    check_dunder_name(handler.name)
                     state[handler.name] = e
                 for stmt in handler.body:
                     evaluate_ast(stmt, state, static_tools, custom_tools, authorized_imports)
@@ -1228,8 +1315,14 @@ def evaluate_with(
     for item in with_node.items:
         context_expr = evaluate_ast(item.context_expr, state, static_tools, custom_tools, authorized_imports)
         if item.optional_vars:
-            state[item.optional_vars.id] = context_expr.__enter__()
-            contexts.append(state[item.optional_vars.id])
+            if isinstance(item.optional_vars, ast.Name):
+                check_dunder_name(item.optional_vars.id)
+                state[item.optional_vars.id] = context_expr.__enter__()
+                contexts.append(state[item.optional_vars.id])
+            else:
+                context_var = context_expr.__enter__()
+                set_value(item.optional_vars, context_var, state, static_tools, custom_tools, authorized_imports)
+                contexts.append(context_var)
         else:
             context_var = context_expr.__enter__()
             contexts.append(context_var)
@@ -1287,6 +1380,8 @@ def get_safe_module(raw_module, authorized_imports, visited=None):
 def evaluate_import(expression, state, static_tools, custom_tools, authorized_imports):
     if isinstance(expression, ast.Import):
         for alias in expression.names:
+            if alias.asname:
+                check_dunder_name(alias.asname)
             if check_import_authorized(alias.name, authorized_imports):
                 raw_module = import_module(alias.name)
                 state[alias.asname or alias.name] = get_safe_module(raw_module, authorized_imports)
@@ -1311,6 +1406,8 @@ def evaluate_import(expression, state, static_tools, custom_tools, authorized_im
                 for alias in expression.names:
                     if is_dunder(alias.name):
                         raise InterpreterError(f"Forbidden import of dunder name: {alias.name}")
+                    if alias.asname:
+                        check_dunder_name(alias.asname)
                     if hasattr(module, alias.name):
                         state[alias.asname or alias.name] = getattr(module, alias.name)
                     else:
@@ -1331,6 +1428,7 @@ def evaluate_generatorexp(
 ) -> Generator[Any]:
     def generator():
         for gen in genexp.generators:
+            check_dunder_target(gen.target)
             iter_value = evaluate_ast(gen.iter, state, static_tools, custom_tools, authorized_imports)
             for value in iter_value:
                 new_state = state.copy()
@@ -1421,6 +1519,7 @@ def evaluate_delete(
     for target in delete_node.targets:
         if isinstance(target, ast.Name):
             # Handle simple variable deletion (del x)
+            check_dunder_name(target.id)
             if target.id in state:
                 del state[target.id]
             else:
@@ -1527,14 +1626,14 @@ def evaluate_ast(
             The list of modules that can be imported by the code. By default, only a few safe modules are allowed.
             If it contains "*", it will authorize any import. Use this at your own risk!
     """
-    if "_operations_count" not in state:
-        state["_operations_count"] = {"counter": 0}
+    if "__operations_count__" not in state:
+        state["__operations_count__"] = {"counter": 0}
 
-    if state["_operations_count"]["counter"] >= MAX_OPERATIONS:
+    if state["__operations_count__"]["counter"] >= MAX_OPERATIONS:
         raise InterpreterError(
             f"Reached the max number of operations of {MAX_OPERATIONS}. Maybe there is an infinite loop somewhere in the code, or you're just asking too many calculations."
         )
-    state["_operations_count"]["counter"] += 1
+    state["__operations_count__"]["counter"] += 1
     handler = NODE_HANDLERS.get(type(expression))
     if handler:
         return handler(expression, state, static_tools, custom_tools, authorized_imports)
@@ -1589,8 +1688,8 @@ def evaluate_python_code(
     static_tools = static_tools.copy() if static_tools is not None else {}
     custom_tools = custom_tools if custom_tools is not None else {}
     result = None
-    state["_print_outputs"] = PrintContainer()
-    state["_operations_count"] = {"counter": 0}
+    state["__print_outputs__"] = PrintContainer()
+    state["__operations_count__"] = {"counter": 0}
 
     if "final_answer" in static_tools:
         previous_final_answer = static_tools["final_answer"]
@@ -1603,20 +1702,20 @@ def evaluate_python_code(
     try:
         for node in expression.body:
             result = evaluate_ast(node, state, static_tools, custom_tools, authorized_imports)
-        state["_print_outputs"].value = truncate_content(
-            str(state["_print_outputs"]), max_length=max_print_outputs_length
+        state["__print_outputs__"].value = truncate_content(
+            str(state["__print_outputs__"]), max_length=max_print_outputs_length
         )
         is_final_answer = False
         return result, is_final_answer
     except FinalAnswerException as e:
-        state["_print_outputs"].value = truncate_content(
-            str(state["_print_outputs"]), max_length=max_print_outputs_length
+        state["__print_outputs__"].value = truncate_content(
+            str(state["__print_outputs__"]), max_length=max_print_outputs_length
         )
         is_final_answer = True
         return e.value, is_final_answer
     except Exception as e:
-        state["_print_outputs"].value = truncate_content(
-            str(state["_print_outputs"]), max_length=max_print_outputs_length
+        state["__print_outputs__"].value = truncate_content(
+            str(state["__print_outputs__"]), max_length=max_print_outputs_length
         )
         raise InterpreterError(
             f"Code execution failed at line '{ast.get_source_segment(code, node)}' due to: {type(e).__name__}: {e}"
@@ -1705,7 +1804,7 @@ class LocalPythonExecutor(PythonExecutor):
             authorized_imports=self.authorized_imports,
             max_print_outputs_length=self.max_print_outputs_length,
         )
-        logs = str(self.state["_print_outputs"])
+        logs = str(self.state["__print_outputs__"])
         return CodeOutput(output=output, logs=logs, is_final_answer=is_final_answer)
 
     def send_variables(self, variables: dict[str, Any]):
