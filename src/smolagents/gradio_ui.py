@@ -32,7 +32,7 @@ def get_step_footnote_content(step_log: ActionStep | PlanningStep, step_name: st
     if step_log.token_usage is not None:
         step_footnote += f" | Input tokens: {step_log.token_usage.input_tokens:,} | Output tokens: {step_log.token_usage.output_tokens:,}"
     step_footnote += f" | Duration: {round(float(step_log.timing.duration), 2)}s" if step_log.timing.duration else ""
-    step_footnote_content = f"""<span style="color: #bbbbc2; font-size: 12px;">{step_footnote}</span> """
+    step_footnote_content = f"""<span style="opacity: 0.7; font-size: 12px;">{step_footnote}</span> """
     return step_footnote_content
 
 
@@ -420,12 +420,12 @@ class GradioUI:
             share (`bool`, defaults to `True`): Whether to share the app publicly.
             **kwargs: Additional keyword arguments to pass to the Gradio launch method.
         """
-        self.create_app().launch(debug=True, share=share, **kwargs)
+        self.create_app().launch(debug=True, share=share, theme="ocean", **kwargs)
 
     def create_app(self):
         import gradio as gr
 
-        with gr.Blocks(theme="ocean", fill_height=True) as demo:
+        with gr.Blocks(fill_height=True) as demo:
             # Add session state to store session-specific data
             session_state = gr.State({})
             stored_messages = gr.State([])
