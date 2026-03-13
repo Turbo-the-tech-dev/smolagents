@@ -55,7 +55,54 @@ ERRORS = {
 DEFAULT_MAX_LEN_OUTPUT = 50000
 MAX_OPERATIONS = 10000000
 MAX_WHILE_ITERATIONS = 1000000
-ALLOWED_DUNDER_METHODS = ["__init__", "__str__", "__repr__"]
+ALLOWED_DUNDER_METHODS = [
+    "__init__",
+    "__str__",
+    "__repr__",
+    "__enter__",
+    "__exit__",
+    "__getitem__",
+    "__setitem__",
+    "__delitem__",
+    "__len__",
+    "__contains__",
+    "__iter__",
+    "__next__",
+    "__eq__",
+    "__ne__",
+    "__lt__",
+    "__le__",
+    "__gt__",
+    "__ge__",
+    "__add__",
+    "__sub__",
+    "__mul__",
+    "__truediv__",
+    "__floordiv__",
+    "__mod__",
+    "__pow__",
+    "__and__",
+    "__or__",
+    "__xor__",
+    "__lshift__",
+    "__rshift__",
+    "__neg__",
+    "__pos__",
+    "__abs__",
+    "__invert__",
+    "__iadd__",
+    "__isub__",
+    "__imul__",
+    "__itruediv__",
+    "__ifloordiv__",
+    "__imod__",
+    "__ipow__",
+    "__iand__",
+    "__ior__",
+    "__ixor__",
+    "__ilshift__",
+    "__irshift__",
+]
 
 
 def custom_print(*args):
@@ -398,6 +445,16 @@ def evaluate_lambda(
     custom_tools: dict[str, Callable],
     authorized_imports: list[str],
 ) -> Callable:
+    all_args = (
+        lambda_expression.args.args
+        + lambda_expression.args.kwonlyargs
+        + ([lambda_expression.args.vararg] if lambda_expression.args.vararg else [])
+        + ([lambda_expression.args.kwarg] if lambda_expression.args.kwarg else [])
+    )
+    for arg in all_args:
+        if is_dunder(arg.arg):
+            raise InterpreterError(f"Forbidden dunder name in lambda arguments: {arg.arg}")
+
     args = [arg.arg for arg in lambda_expression.args.args]
 
     def lambda_func(*values: Any) -> Any:
@@ -448,6 +505,16 @@ def create_function(
 
     def new_func(*args: Any, **kwargs: Any) -> Any:
         func_state = state.copy()
+        all_args = (
+            func_def.args.args
+            + func_def.args.kwonlyargs
+            + ([func_def.args.vararg] if func_def.args.vararg else [])
+            + ([func_def.args.kwarg] if func_def.args.kwarg else [])
+        )
+        for arg in all_args:
+            if is_dunder(arg.arg):
+                raise InterpreterError(f"Forbidden dunder name in function arguments: {arg.arg}")
+
         arg_names = [arg.arg for arg in func_def.args.args]
         default_values = [
             evaluate_ast(d, state, static_tools, custom_tools, authorized_imports) for d in func_def.args.defaults
@@ -511,6 +578,8 @@ def evaluate_function_def(
     custom_tools: dict[str, Callable],
     authorized_imports: list[str],
 ) -> Callable:
+    if is_dunder(func_def.name) and func_def.name not in ALLOWED_DUNDER_METHODS:
+        raise InterpreterError(f"Forbidden dunder name for function: {func_def.name}")
     custom_tools[func_def.name] = create_function(func_def, state, static_tools, custom_tools, authorized_imports)
     return custom_tools[func_def.name]
 
@@ -522,6 +591,8 @@ def evaluate_class_def(
     custom_tools: dict[str, Callable],
     authorized_imports: list[str],
 ) -> type:
+    if is_dunder(class_def.name):
+        raise InterpreterError(f"Forbidden dunder name for class: {class_def.name}")
     class_name = class_def.name
     bases = [evaluate_ast(base, state, static_tools, custom_tools, authorized_imports) for base in class_def.bases]
 
@@ -782,6 +853,8 @@ def set_value(
     authorized_imports: list[str],
 ) -> None:
     if isinstance(target, ast.Name):
+        if is_dunder(target.id):
+            raise InterpreterError(f"Forbidden assignment to dunder name: {target.id}")
         if target.id in static_tools:
             raise InterpreterError(f"Cannot assign to name '{target.id}': doing this would erase the existing tool!")
         state[target.id] = value
@@ -929,6 +1002,8 @@ def evaluate_name(
     custom_tools: dict[str, Callable],
     authorized_imports: list[str],
 ) -> Any:
+    if is_dunder(name.id) and name.id != "__name__":
+        raise InterpreterError(f"Forbidden access to dunder name: {name.id}")
     if name.id in state:
         return state[name.id]
     elif name.id in static_tools:
@@ -1159,6 +1234,8 @@ def evaluate_try(
             ):
                 matched = True
                 if handler.name:
+                    if is_dunder(handler.name):
+                        raise InterpreterError(f"Forbidden dunder name for exception: {handler.name}")
                     state[handler.name] = e
                 for stmt in handler.body:
                     evaluate_ast(stmt, state, static_tools, custom_tools, authorized_imports)
@@ -1227,12 +1304,12 @@ def evaluate_with(
     contexts = []
     for item in with_node.items:
         context_expr = evaluate_ast(item.context_expr, state, static_tools, custom_tools, authorized_imports)
+        enter_result = context_expr.__enter__()
         if item.optional_vars:
-            state[item.optional_vars.id] = context_expr.__enter__()
-            contexts.append(state[item.optional_vars.id])
+            set_value(item.optional_vars, enter_result, state, static_tools, custom_tools, authorized_imports)
+            contexts.append(enter_result)
         else:
-            context_var = context_expr.__enter__()
-            contexts.append(context_var)
+            contexts.append(enter_result)
 
     try:
         for stmt in with_node.body:
@@ -1287,6 +1364,8 @@ def get_safe_module(raw_module, authorized_imports, visited=None):
 def evaluate_import(expression, state, static_tools, custom_tools, authorized_imports):
     if isinstance(expression, ast.Import):
         for alias in expression.names:
+            if is_dunder(alias.asname or alias.name):
+                raise InterpreterError(f"Forbidden import of dunder name: {alias.asname or alias.name}")
             if check_import_authorized(alias.name, authorized_imports):
                 raw_module = import_module(alias.name)
                 state[alias.asname or alias.name] = get_safe_module(raw_module, authorized_imports)
@@ -1302,15 +1381,16 @@ def evaluate_import(expression, state, static_tools, custom_tools, authorized_im
             if expression.names[0].name == "*":  # Handle "from module import *"
                 if hasattr(module, "__all__"):  # If module has __all__, import only those names
                     for name in module.__all__:
-                        state[name] = getattr(module, name)
+                        if not is_dunder(name):
+                            state[name] = getattr(module, name)
                 else:  # If no __all__, import all public names (those not starting with '_')
                     for name in dir(module):
-                        if not name.startswith("_"):
+                        if not name.startswith("_") and not is_dunder(name):
                             state[name] = getattr(module, name)
             else:  # regular from imports
                 for alias in expression.names:
-                    if is_dunder(alias.name):
-                        raise InterpreterError(f"Forbidden import of dunder name: {alias.name}")
+                    if is_dunder(alias.asname or alias.name):
+                        raise InterpreterError(f"Forbidden import of dunder name: {alias.asname or alias.name}")
                     if hasattr(module, alias.name):
                         state[alias.asname or alias.name] = getattr(module, alias.name)
                     else:
