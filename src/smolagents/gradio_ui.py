@@ -32,7 +32,7 @@ def get_step_footnote_content(step_log: ActionStep | PlanningStep, step_name: st
     if step_log.token_usage is not None:
         step_footnote += f" | Input tokens: {step_log.token_usage.input_tokens:,} | Output tokens: {step_log.token_usage.output_tokens:,}"
     step_footnote += f" | Duration: {round(float(step_log.timing.duration), 2)}s" if step_log.timing.duration else ""
-    step_footnote_content = f"""<span style="color: #bbbbc2; font-size: 12px;">{step_footnote}</span> """
+    step_footnote_content = f"""<span style="opacity: 0.7; font-size: 12px;">{step_footnote}</span> """
     return step_footnote_content
 
 
@@ -443,7 +443,7 @@ class GradioUI:
                     text_input = gr.Textbox(
                         lines=3,
                         label="Chat Message",
-                        container=False,
+                        container=True,
                         placeholder="Enter your prompt here and press Shift+Enter or press the button",
                         autofocus=True,
                     )
@@ -461,7 +461,7 @@ class GradioUI:
                     )
 
                 gr.HTML(
-                    "<br><br><h4><center>Powered by <a target='_blank' href='https://github.com/huggingface/smolagents'><b>smolagents</b></a></center></h4>"
+                    "<br><br><div style='text-align: center;'><h4>Powered by <a target='_blank' href='https://github.com/huggingface/smolagents'><b>smolagents</b></a></h4></div>"
                 )
 
             # Main chat interface
@@ -473,7 +473,7 @@ class GradioUI:
                 ),
                 resizable=True,
                 scale=1,
-                buttons=["copy"],
+                buttons=["copy", "clear"],
                 latex_delimiters=[
                     {"left": r"$$", "right": r"$$", "display": True},
                     {"left": r"$", "right": r"$", "display": False},
@@ -518,7 +518,10 @@ class GradioUI:
 
             stop_btn.click(self.interrupt_agent, None, [stop_btn, submit_btn], cancels=[submit_event, click_event])
 
-            chatbot.clear(self.agent.memory.reset)
+            chatbot.clear(
+                lambda: ([], []),
+                outputs=[stored_messages, file_uploads_log],
+            ).then(self.agent.memory.reset)
         return demo
 
 
