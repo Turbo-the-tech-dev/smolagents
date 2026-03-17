@@ -17,7 +17,6 @@
 import ast
 import builtins
 import difflib
-import inspect
 import logging
 import math
 import re
@@ -166,6 +165,10 @@ DANGEROUS_FUNCTIONS = [
 ]
 
 DANGEROUS_FUNCTIONS_NAMES = {func.split(".")[-1] for func in DANGEROUS_FUNCTIONS}
+DANGEROUS_FUNCTIONS_SET = {tuple(func.rsplit(".", 1)) for func in DANGEROUS_FUNCTIONS}
+
+
+CHECKED_NODES = {ast.Call, ast.Name, ast.Attribute, ast.Subscript}
 
 
 def check_safer_result(result: Any, static_tools: dict[str, Callable] = None, authorized_imports: list[str] = None):
@@ -191,42 +194,13 @@ def check_safer_result(result: Any, static_tools: dict[str, Callable] = None, au
     elif isinstance(result, (FunctionType, BuiltinFunctionType)):
         if result.__name__ not in DANGEROUS_FUNCTIONS_NAMES:
             return
-        for qualified_function_name in DANGEROUS_FUNCTIONS:
-            module_name, function_name = qualified_function_name.rsplit(".", 1)
-            if (
-                (static_tools is None or function_name not in static_tools)
-                and result.__name__ == function_name
-                and result.__module__ == module_name
-            ):
-                raise InterpreterError(f"Forbidden access to function: {function_name}")
+        if (static_tools is None or result.__name__ not in static_tools) and (
+            getattr(result, "__module__", None),
+            result.__name__,
+        ) in DANGEROUS_FUNCTIONS_SET:
+            raise InterpreterError(f"Forbidden access to function: {result.__name__}")
 
 
-def safer_eval(func: Callable):
-    """
-    Decorator to enhance the security of an evaluation function by checking its return value.
-
-    Args:
-        func (Callable): Evaluation function to be made safer.
-
-    Returns:
-        Callable: Safer evaluation function with return value check.
-    """
-
-    @wraps(func)
-    def _check_return(
-        expression,
-        state,
-        static_tools,
-        custom_tools,
-        authorized_imports=BASE_BUILTIN_MODULES,
-    ):
-        result = func(expression, state, static_tools, custom_tools, authorized_imports=authorized_imports)
-        if result is None or isinstance(result, (bool, int, float, str)):
-            return result
-        check_safer_result(result, static_tools, authorized_imports)
-        return result
-
-    return _check_return
 
 
 def safer_func(
@@ -887,7 +861,11 @@ def evaluate_call(
         state["_print_outputs"] += " ".join(map(str, args)) + "\n"
         return None
     else:  # Assume it's a callable object
-        if (inspect.getmodule(func) == builtins) and inspect.isbuiltin(func) and (func not in static_tools.values()):
+        if (
+            isinstance(func, BuiltinFunctionType)
+            and getattr(func, "__module__", None) == "builtins"
+            and (func not in static_tools.values())
+        ):
             raise InterpreterError(
                 f"Invoking a builtin function that has not been explicitly added as a tool is not allowed ({func_name})."
             )
@@ -1499,7 +1477,6 @@ if hasattr(ast, "Index"):
     NODE_HANDLERS[ast.Index] = lambda expr, *args: evaluate_ast(expr.value, *args)
 
 
-@safer_eval
 def evaluate_ast(
     expression: ast.AST,
     state: dict[str, Any],
@@ -1529,15 +1506,20 @@ def evaluate_ast(
     """
     if "_operations_count" not in state:
         state["_operations_count"] = {"counter": 0}
+    operations_count = state["_operations_count"]
 
-    if state["_operations_count"]["counter"] >= MAX_OPERATIONS:
+    if operations_count["counter"] >= MAX_OPERATIONS:
         raise InterpreterError(
             f"Reached the max number of operations of {MAX_OPERATIONS}. Maybe there is an infinite loop somewhere in the code, or you're just asking too many calculations."
         )
-    state["_operations_count"]["counter"] += 1
-    handler = NODE_HANDLERS.get(type(expression))
+    operations_count["counter"] += 1
+    expression_type = type(expression)
+    handler = NODE_HANDLERS.get(expression_type)
     if handler:
-        return handler(expression, state, static_tools, custom_tools, authorized_imports)
+        result = handler(expression, state, static_tools, custom_tools, authorized_imports)
+        if expression_type in CHECKED_NODES:
+            check_safer_result(result, static_tools, authorized_imports)
+        return result
     # For now we refuse anything else. Let's add things as we need them.
     raise InterpreterError(f"{expression.__class__.__name__} is not supported.")
 
