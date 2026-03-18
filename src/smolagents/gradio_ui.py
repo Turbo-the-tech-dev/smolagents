@@ -32,7 +32,7 @@ def get_step_footnote_content(step_log: ActionStep | PlanningStep, step_name: st
     if step_log.token_usage is not None:
         step_footnote += f" | Input tokens: {step_log.token_usage.input_tokens:,} | Output tokens: {step_log.token_usage.output_tokens:,}"
     step_footnote += f" | Duration: {round(float(step_log.timing.duration), 2)}s" if step_log.timing.duration else ""
-    step_footnote_content = f"""<span style="color: #bbbbc2; font-size: 12px;">{step_footnote}</span> """
+    step_footnote_content = f"""<span style="opacity: 0.7; font-size: 12px;">{step_footnote}</span> """
     return step_footnote_content
 
 
@@ -368,14 +368,15 @@ class GradioUI:
         import gradio as gr
 
         if file is None:
-            return gr.Textbox(value="No file uploaded", visible=True), file_uploads_log
+            return file_uploads_log
 
         if allowed_file_types is None:
             allowed_file_types = [".pdf", ".docx", ".txt"]
 
         file_ext = os.path.splitext(file.name)[1].lower()
         if file_ext not in allowed_file_types:
-            return gr.Textbox("File type disallowed", visible=True), file_uploads_log
+            gr.Warning(f"File type {file_ext} not allowed. Only {', '.join(allowed_file_types)} are supported.")
+            return file_uploads_log
 
         # Sanitize file name
         original_name = os.path.basename(file.name)
@@ -387,7 +388,8 @@ class GradioUI:
         file_path = os.path.join(self.file_upload_folder, os.path.basename(sanitized_name))
         shutil.copy(file.name, file_path)
 
-        return gr.Textbox(f"File uploaded: {file_path}", visible=True), file_uploads_log + [file_path]
+        gr.Info(f"File uploaded successfully: {sanitized_name}")
+        return file_uploads_log + [file_path]
 
     def log_user_message(self, text_input, file_uploads_log):
         import gradio as gr
@@ -411,6 +413,10 @@ class GradioUI:
         if hasattr(self.agent, "interrupt"):
             self.agent.interrupt()
         return gr.update(visible=False), gr.update(interactive=True, visible=True)
+
+    def clear_all(self):
+        self.agent.memory.reset()
+        return [], []
 
     def launch(self, share: bool = True, **kwargs):
         """
@@ -439,11 +445,10 @@ class GradioUI:
                 )
 
                 with gr.Group():
-                    gr.Markdown("**Your request**", container=True)
                     text_input = gr.Textbox(
                         lines=3,
-                        label="Chat Message",
-                        container=False,
+                        label="Your request",
+                        container=True,
                         placeholder="Enter your prompt here and press Shift+Enter or press the button",
                         autofocus=True,
                     )
@@ -453,15 +458,14 @@ class GradioUI:
                 # If an upload folder is provided, enable the upload feature
                 if self.file_upload_folder is not None:
                     upload_file = gr.File(label="Upload a file")
-                    upload_status = gr.Textbox(label="Upload Status", interactive=False, visible=False)
                     upload_file.change(
                         self.upload_file,
                         [upload_file, file_uploads_log],
-                        [upload_status, file_uploads_log],
+                        [file_uploads_log],
                     )
 
                 gr.HTML(
-                    "<br><br><h4><center>Powered by <a target='_blank' href='https://github.com/huggingface/smolagents'><b>smolagents</b></a></center></h4>"
+                    "<br><br><div style='text-align: center;'><h4>Powered by <a target='_blank' href='https://github.com/huggingface/smolagents'><b>smolagents</b></a></h4></div>"
                 )
 
             # Main chat interface
@@ -473,7 +477,7 @@ class GradioUI:
                 ),
                 resizable=True,
                 scale=1,
-                buttons=["copy"],
+                buttons=["copy", "clear"],
                 latex_delimiters=[
                     {"left": r"$$", "right": r"$$", "display": True},
                     {"left": r"$", "right": r"$", "display": False},
@@ -491,7 +495,7 @@ class GradioUI:
             ).then(self.interact_with_agent, [stored_messages, chatbot, session_state], [chatbot]).then(
                 lambda: (
                     gr.update(
-                        interactive=True, placeholder="Enter your prompt here and press Shift+Enter or the button"
+                        interactive=True, placeholder="Enter your prompt here and press Shift+Enter or press the button"
                     ),
                     gr.update(interactive=True, visible=True),
                     gr.update(visible=False),
@@ -507,7 +511,7 @@ class GradioUI:
             ).then(self.interact_with_agent, [stored_messages, chatbot, session_state], [chatbot]).then(
                 lambda: (
                     gr.update(
-                        interactive=True, placeholder="Enter your prompt here and press Shift+Enter or the button"
+                        interactive=True, placeholder="Enter your prompt here and press Shift+Enter or press the button"
                     ),
                     gr.update(interactive=True, visible=True),
                     gr.update(visible=False),
@@ -518,7 +522,7 @@ class GradioUI:
 
             stop_btn.click(self.interrupt_agent, None, [stop_btn, submit_btn], cancels=[submit_event, click_event])
 
-            chatbot.clear(self.agent.memory.reset)
+            chatbot.clear(self.clear_all, None, [stored_messages, file_uploads_log])
         return demo
 
 
