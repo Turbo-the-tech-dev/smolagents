@@ -368,14 +368,15 @@ class GradioUI:
         import gradio as gr
 
         if file is None:
-            return gr.Textbox(value="No file uploaded", visible=True), file_uploads_log
+            return file_uploads_log
 
         if allowed_file_types is None:
             allowed_file_types = [".pdf", ".docx", ".txt"]
 
         file_ext = os.path.splitext(file.name)[1].lower()
         if file_ext not in allowed_file_types:
-            return gr.Textbox("File type disallowed", visible=True), file_uploads_log
+            gr.Warning(f"File type {file_ext} disallowed")
+            return file_uploads_log
 
         # Sanitize file name
         original_name = os.path.basename(file.name)
@@ -387,7 +388,8 @@ class GradioUI:
         file_path = os.path.join(self.file_upload_folder, os.path.basename(sanitized_name))
         shutil.copy(file.name, file_path)
 
-        return gr.Textbox(f"File uploaded: {file_path}", visible=True), file_uploads_log + [file_path]
+        gr.Info(f"File uploaded: {file_path}")
+        return file_uploads_log + [file_path]
 
     def log_user_message(self, text_input, file_uploads_log):
         import gradio as gr
@@ -404,6 +406,10 @@ class GradioUI:
             gr.update(visible=False, interactive=False),
             gr.update(visible=True, interactive=True),
         )
+
+    def clear_all(self):
+        self.agent.memory.reset()
+        return [], []
 
     def interrupt_agent(self):
         import gradio as gr
@@ -453,15 +459,14 @@ class GradioUI:
                 # If an upload folder is provided, enable the upload feature
                 if self.file_upload_folder is not None:
                     upload_file = gr.File(label="Upload a file")
-                    upload_status = gr.Textbox(label="Upload Status", interactive=False, visible=False)
                     upload_file.change(
                         self.upload_file,
                         [upload_file, file_uploads_log],
-                        [upload_status, file_uploads_log],
+                        [file_uploads_log],
                     )
 
                 gr.HTML(
-                    "<br><br><h4><center>Powered by <a target='_blank' href='https://github.com/huggingface/smolagents'><b>smolagents</b></a></center></h4>"
+                    "<br><br><div style='text-align: center;'><h4>Powered by <a target='_blank' href='https://github.com/huggingface/smolagents'><b>smolagents</b></a></h4></div>"
                 )
 
             # Main chat interface
@@ -473,7 +478,7 @@ class GradioUI:
                 ),
                 resizable=True,
                 scale=1,
-                buttons=["copy"],
+                buttons=["copy", "clear"],
                 latex_delimiters=[
                     {"left": r"$$", "right": r"$$", "display": True},
                     {"left": r"$", "right": r"$", "display": False},
@@ -518,7 +523,7 @@ class GradioUI:
 
             stop_btn.click(self.interrupt_agent, None, [stop_btn, submit_btn], cancels=[submit_event, click_event])
 
-            chatbot.clear(self.agent.memory.reset)
+            chatbot.clear(self.clear_all, None, [stored_messages, file_uploads_log])
         return demo
 
 
