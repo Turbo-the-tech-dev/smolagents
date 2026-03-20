@@ -361,7 +361,10 @@ class TestPullMessagesFromStep:
 
     def test_final_answer_step_audio(self):
         """Test FinalAnswerStep with audio answer."""
-        with patch.object(AgentAudio, "to_string", return_value="path/to/audio.wav"):
+        with (
+            patch.object(AgentAudio, "__init__", return_value=None),
+            patch.object(AgentAudio, "to_string", return_value="path/to/audio.wav"),
+        ):
             step = FinalAnswerStep(output=AgentAudio("path/to/audio.wav"))
             messages = list(pull_messages_from_step(step))
             assert len(messages) == 1
