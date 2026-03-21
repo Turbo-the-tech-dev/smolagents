@@ -167,6 +167,11 @@ DANGEROUS_FUNCTIONS = [
 
 DANGEROUS_FUNCTIONS_NAMES = {func.split(".")[-1] for func in DANGEROUS_FUNCTIONS}
 
+DANGEROUS_FUNCTIONS_SET = set()
+for func in DANGEROUS_FUNCTIONS:
+    module_name, function_name = func.rsplit(".", 1)
+    DANGEROUS_FUNCTIONS_SET.add((module_name, function_name))
+
 
 def check_safer_result(result: Any, static_tools: dict[str, Callable] = None, authorized_imports: list[str] = None):
     """
@@ -189,15 +194,12 @@ def check_safer_result(result: Any, static_tools: dict[str, Callable] = None, au
         if not check_import_authorized(result["__name__"], authorized_imports):
             raise InterpreterError(f"Forbidden access to module: {result['__name__']}")
     elif isinstance(result, (FunctionType, BuiltinFunctionType)):
-        if result.__name__ not in DANGEROUS_FUNCTIONS_NAMES:
+        function_name = result.__name__
+        if function_name not in DANGEROUS_FUNCTIONS_NAMES:
             return
-        for qualified_function_name in DANGEROUS_FUNCTIONS:
-            module_name, function_name = qualified_function_name.rsplit(".", 1)
-            if (
-                (static_tools is None or function_name not in static_tools)
-                and result.__name__ == function_name
-                and result.__module__ == module_name
-            ):
+        module_name = getattr(result, "__module__", None)
+        if (module_name, function_name) in DANGEROUS_FUNCTIONS_SET:
+            if static_tools is None or function_name not in static_tools:
                 raise InterpreterError(f"Forbidden access to function: {function_name}")
 
 
@@ -887,7 +889,11 @@ def evaluate_call(
         state["_print_outputs"] += " ".join(map(str, args)) + "\n"
         return None
     else:  # Assume it's a callable object
-        if (inspect.getmodule(func) == builtins) and inspect.isbuiltin(func) and (func not in static_tools.values()):
+        if (
+            getattr(func, "__module__", None) == "builtins"
+            and isinstance(func, BuiltinFunctionType)
+            and (func not in static_tools.values())
+        ):
             raise InterpreterError(
                 f"Invoking a builtin function that has not been explicitly added as a tool is not allowed ({func_name})."
             )
@@ -1499,7 +1505,9 @@ if hasattr(ast, "Index"):
     NODE_HANDLERS[ast.Index] = lambda expr, *args: evaluate_ast(expr.value, *args)
 
 
-@safer_eval
+CHECKED_NODES = {ast.Call, ast.Name, ast.Attribute, ast.Subscript}
+
+
 def evaluate_ast(
     expression: ast.AST,
     state: dict[str, Any],
@@ -1527,17 +1535,24 @@ def evaluate_ast(
             The list of modules that can be imported by the code. By default, only a few safe modules are allowed.
             If it contains "*", it will authorize any import. Use this at your own risk!
     """
-    if "_operations_count" not in state:
-        state["_operations_count"] = {"counter": 0}
+    try:
+        operations_count = state["_operations_count"]
+    except KeyError:
+        operations_count = state["_operations_count"] = {"counter": 0}
 
-    if state["_operations_count"]["counter"] >= MAX_OPERATIONS:
+    if operations_count["counter"] >= MAX_OPERATIONS:
         raise InterpreterError(
             f"Reached the max number of operations of {MAX_OPERATIONS}. Maybe there is an infinite loop somewhere in the code, or you're just asking too many calculations."
         )
-    state["_operations_count"]["counter"] += 1
-    handler = NODE_HANDLERS.get(type(expression))
+    operations_count["counter"] += 1
+
+    expression_type = type(expression)
+    handler = NODE_HANDLERS.get(expression_type)
     if handler:
-        return handler(expression, state, static_tools, custom_tools, authorized_imports)
+        result = handler(expression, state, static_tools, custom_tools, authorized_imports)
+        if expression_type in CHECKED_NODES:
+            check_safer_result(result, static_tools, authorized_imports)
+        return result
     # For now we refuse anything else. Let's add things as we need them.
     raise InterpreterError(f"{expression.__class__.__name__} is not supported.")
 
