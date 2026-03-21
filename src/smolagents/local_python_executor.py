@@ -1287,6 +1287,10 @@ def get_safe_module(raw_module, authorized_imports, visited=None):
 def evaluate_import(expression, state, static_tools, custom_tools, authorized_imports):
     if isinstance(expression, ast.Import):
         for alias in expression.names:
+            if is_dunder(alias.name) or (alias.asname and is_dunder(alias.asname)):
+                raise InterpreterError(
+                    f"Forbidden import of dunder name: {alias.name}{f' as {alias.asname}' if alias.asname else ''}"
+                )
             if check_import_authorized(alias.name, authorized_imports):
                 raw_module = import_module(alias.name)
                 state[alias.asname or alias.name] = get_safe_module(raw_module, authorized_imports)
@@ -1302,6 +1306,8 @@ def evaluate_import(expression, state, static_tools, custom_tools, authorized_im
             if expression.names[0].name == "*":  # Handle "from module import *"
                 if hasattr(module, "__all__"):  # If module has __all__, import only those names
                     for name in module.__all__:
+                        if is_dunder(name):
+                            continue
                         state[name] = getattr(module, name)
                 else:  # If no __all__, import all public names (those not starting with '_')
                     for name in dir(module):
@@ -1309,8 +1315,10 @@ def evaluate_import(expression, state, static_tools, custom_tools, authorized_im
                             state[name] = getattr(module, name)
             else:  # regular from imports
                 for alias in expression.names:
-                    if is_dunder(alias.name):
-                        raise InterpreterError(f"Forbidden import of dunder name: {alias.name}")
+                    if is_dunder(alias.name) or (alias.asname and is_dunder(alias.asname)):
+                        raise InterpreterError(
+                            f"Forbidden import of dunder name: {alias.name}{f' as {alias.asname}' if alias.asname else ''}"
+                        )
                     if hasattr(module, alias.name):
                         state[alias.asname or alias.name] = getattr(module, alias.name)
                     else:
