@@ -22,6 +22,7 @@ from unittest.mock import Mock, patch
 import pytest
 
 from smolagents.agent_types import AgentAudio, AgentImage, AgentText
+from smolagents.utils import _is_package_available
 from smolagents.gradio_ui import GradioUI, pull_messages_from_step, stream_to_gradio
 from smolagents.memory import ActionStep, FinalAnswerStep, PlanningStep, ToolCall
 from smolagents.models import ChatMessageStreamDelta
@@ -79,6 +80,13 @@ class GradioUITester(unittest.TestCase):
             self.assertEqual(len(uploads_log), 1)
             self.assertTrue(os.path.exists(os.path.join(self.temp_dir, os.path.basename(temp_file.name))))
             self.assertEqual(uploads_log[0], os.path.join(self.temp_dir, os.path.basename(temp_file.name)))
+
+    def test_log_user_message_preserves_uploads(self):
+        """Test that log_user_message preserves file_uploads_log"""
+        initial_log = ["path1.txt", "path2.pdf"]
+        result = self.ui.log_user_message("test message", initial_log)
+        # The result of log_user_message is a tuple: (full_message, "", current_log, gr.update, gr.update)
+        self.assertEqual(result[2], initial_log)
 
     def test_upload_file_none(self):
         """Test scenario when no file is selected"""
@@ -359,6 +367,10 @@ class TestPullMessagesFromStep:
             assert messages[0].content["path"] == "path/to/image.png"
             assert messages[0].content["mime_type"] == "image/png"
 
+    @pytest.mark.skipif(
+        not _is_package_available("torch") or not _is_package_available("soundfile"),
+        reason="Audio dependencies not installed",
+    )
     def test_final_answer_step_audio(self):
         """Test FinalAnswerStep with audio answer."""
         with patch.object(AgentAudio, "to_string", return_value="path/to/audio.wav"):
