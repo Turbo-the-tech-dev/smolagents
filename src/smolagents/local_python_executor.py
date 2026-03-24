@@ -37,6 +37,9 @@ from .utils import BASE_BUILTIN_MODULES, truncate_content
 logger = logging.getLogger(__name__)
 
 
+CHECKED_NODES = {ast.Call, ast.Name, ast.Attribute, ast.Subscript}
+
+
 class InterpreterError(ValueError):
     """
     An error raised when the interpreter cannot evaluate a Python expression, due to syntax error or unsupported
@@ -1499,7 +1502,6 @@ if hasattr(ast, "Index"):
     NODE_HANDLERS[ast.Index] = lambda expr, *args: evaluate_ast(expr.value, *args)
 
 
-@safer_eval
 def evaluate_ast(
     expression: ast.AST,
     state: dict[str, Any],
@@ -1527,17 +1529,25 @@ def evaluate_ast(
             The list of modules that can be imported by the code. By default, only a few safe modules are allowed.
             If it contains "*", it will authorize any import. Use this at your own risk!
     """
-    if "_operations_count" not in state:
-        state["_operations_count"] = {"counter": 0}
+    try:
+        ops_count = state["_operations_count"]
+        if ops_count["counter"] >= MAX_OPERATIONS:
+            raise InterpreterError(
+                f"Reached the max number of operations of {MAX_OPERATIONS}. Maybe there is an infinite loop somewhere in the code, or you're just asking too many calculations."
+            )
+        ops_count["counter"] += 1
+    except KeyError:
+        state["_operations_count"] = {"counter": 1}
 
-    if state["_operations_count"]["counter"] >= MAX_OPERATIONS:
-        raise InterpreterError(
-            f"Reached the max number of operations of {MAX_OPERATIONS}. Maybe there is an infinite loop somewhere in the code, or you're just asking too many calculations."
-        )
-    state["_operations_count"]["counter"] += 1
-    handler = NODE_HANDLERS.get(type(expression))
+    node_type = type(expression)
+    handler = NODE_HANDLERS.get(node_type)
     if handler:
-        return handler(expression, state, static_tools, custom_tools, authorized_imports)
+        result = handler(expression, state, static_tools, custom_tools, authorized_imports)
+        if node_type in CHECKED_NODES:
+            if result is None or isinstance(result, (bool, int, float, str)):
+                return result
+            check_safer_result(result, static_tools, authorized_imports)
+        return result
     # For now we refuse anything else. Let's add things as we need them.
     raise InterpreterError(f"{expression.__class__.__name__} is not supported.")
 
