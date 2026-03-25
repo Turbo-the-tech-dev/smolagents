@@ -26,6 +26,7 @@ from smolagents.gradio_ui import GradioUI, pull_messages_from_step, stream_to_gr
 from smolagents.memory import ActionStep, FinalAnswerStep, PlanningStep, ToolCall
 from smolagents.models import ChatMessageStreamDelta
 from smolagents.monitoring import Timing, TokenUsage
+from smolagents.utils import _is_package_available
 
 
 class GradioUITester(unittest.TestCase):
@@ -359,6 +360,10 @@ class TestPullMessagesFromStep:
             assert messages[0].content["path"] == "path/to/image.png"
             assert messages[0].content["mime_type"] == "image/png"
 
+    @pytest.mark.skipif(
+        not _is_package_available("torch") or not _is_package_available("soundfile"),
+        reason="Audio dependencies not installed",
+    )
     def test_final_answer_step_audio(self):
         """Test FinalAnswerStep with audio answer."""
         with patch.object(AgentAudio, "to_string", return_value="path/to/audio.wav"):

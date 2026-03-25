@@ -32,7 +32,7 @@ def get_step_footnote_content(step_log: ActionStep | PlanningStep, step_name: st
     if step_log.token_usage is not None:
         step_footnote += f" | Input tokens: {step_log.token_usage.input_tokens:,} | Output tokens: {step_log.token_usage.output_tokens:,}"
     step_footnote += f" | Duration: {round(float(step_log.timing.duration), 2)}s" if step_log.timing.duration else ""
-    step_footnote_content = f"""<span style="color: #bbbbc2; font-size: 12px;">{step_footnote}</span> """
+    step_footnote_content = f"""<span style="color: #6b7280; font-size: 12px;">{step_footnote}</span> """
     return step_footnote_content
 
 
@@ -461,7 +461,7 @@ class GradioUI:
                     )
 
                 gr.HTML(
-                    "<br><br><h4><center>Powered by <a target='_blank' href='https://github.com/huggingface/smolagents'><b>smolagents</b></a></center></h4>"
+                    "<br><br><h4 style='text-align: center;'>Powered by <a target='_blank' rel='noopener noreferrer' href='https://github.com/huggingface/smolagents'><b>smolagents</b></a></h4>"
                 )
 
             # Main chat interface
@@ -473,7 +473,7 @@ class GradioUI:
                 ),
                 resizable=True,
                 scale=1,
-                buttons=["copy"],
+                buttons=["copy", "clear"],
                 latex_delimiters=[
                     {"left": r"$$", "right": r"$$", "display": True},
                     {"left": r"$", "right": r"$", "display": False},
@@ -518,7 +518,9 @@ class GradioUI:
 
             stop_btn.click(self.interrupt_agent, None, [stop_btn, submit_btn], cancels=[submit_event, click_event])
 
-            chatbot.clear(self.agent.memory.reset)
+            clear_event = chatbot.clear(self.agent.memory.reset).then(lambda: [], None, [file_uploads_log])
+            if self.file_upload_folder is not None:
+                clear_event.then(lambda: (None, gr.update(visible=False)), None, [upload_file, upload_status])
         return demo
 
 
