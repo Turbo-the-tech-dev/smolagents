@@ -887,7 +887,11 @@ def evaluate_call(
         state["_print_outputs"] += " ".join(map(str, args)) + "\n"
         return None
     else:  # Assume it's a callable object
-        if (inspect.getmodule(func) == builtins) and inspect.isbuiltin(func) and (func not in static_tools.values()):
+        if (
+            isinstance(func, BuiltinFunctionType)
+            and getattr(func, "__module__", None) == "builtins"
+            and (func not in static_tools.values())
+        ):
             raise InterpreterError(
                 f"Invoking a builtin function that has not been explicitly added as a tool is not allowed ({func_name})."
             )
@@ -1499,7 +1503,9 @@ if hasattr(ast, "Index"):
     NODE_HANDLERS[ast.Index] = lambda expr, *args: evaluate_ast(expr.value, *args)
 
 
-@safer_eval
+CHECKED_NODES = {ast.Call, ast.Name, ast.Attribute, ast.Subscript, ast.Lambda, ast.FunctionDef}
+
+
 def evaluate_ast(
     expression: ast.AST,
     state: dict[str, Any],
@@ -1527,17 +1533,28 @@ def evaluate_ast(
             The list of modules that can be imported by the code. By default, only a few safe modules are allowed.
             If it contains "*", it will authorize any import. Use this at your own risk!
     """
-    if "_operations_count" not in state:
-        state["_operations_count"] = {"counter": 0}
+    try:
+        ops = state["_operations_count"]
+    except KeyError:
+        ops = state["_operations_count"] = {"counter": 0}
 
-    if state["_operations_count"]["counter"] >= MAX_OPERATIONS:
+    if ops["counter"] >= MAX_OPERATIONS:
         raise InterpreterError(
             f"Reached the max number of operations of {MAX_OPERATIONS}. Maybe there is an infinite loop somewhere in the code, or you're just asking too many calculations."
         )
-    state["_operations_count"]["counter"] += 1
+    ops["counter"] += 1
+
     handler = NODE_HANDLERS.get(type(expression))
     if handler:
-        return handler(expression, state, static_tools, custom_tools, authorized_imports)
+        result = handler(expression, state, static_tools, custom_tools, authorized_imports)
+
+        # Inline security check for speed. Only check nodes that can return unsafe objects.
+        if type(expression) in CHECKED_NODES:
+            if result is None or isinstance(result, (bool, int, float, str)):
+                return result
+            check_safer_result(result, static_tools, authorized_imports)
+        return result
+
     # For now we refuse anything else. Let's add things as we need them.
     raise InterpreterError(f"{expression.__class__.__name__} is not supported.")
 
