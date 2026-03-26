@@ -443,9 +443,11 @@ class GradioUI:
                     text_input = gr.Textbox(
                         lines=3,
                         label="Chat Message",
+                        show_label=False,
                         container=False,
-                        placeholder="Enter your prompt here and press Shift+Enter or press the button",
+                        placeholder="Enter your prompt here and press Ctrl/Cmd+Enter or press the button",
                         autofocus=True,
+                        html_attributes={"aria-label": "Chat Message"},
                     )
                     submit_btn = gr.Button("🚀 Submit", variant="primary")
                     stop_btn = gr.Button("🛑 Stop", variant="danger", visible=False)
@@ -491,7 +493,7 @@ class GradioUI:
             ).then(self.interact_with_agent, [stored_messages, chatbot, session_state], [chatbot]).then(
                 lambda: (
                     gr.update(
-                        interactive=True, placeholder="Enter your prompt here and press Shift+Enter or the button"
+                        interactive=True, placeholder="Enter your prompt here and press Ctrl/Cmd+Enter or the button"
                     ),
                     gr.update(interactive=True, visible=True),
                     gr.update(visible=False),
@@ -507,7 +509,7 @@ class GradioUI:
             ).then(self.interact_with_agent, [stored_messages, chatbot, session_state], [chatbot]).then(
                 lambda: (
                     gr.update(
-                        interactive=True, placeholder="Enter your prompt here and press Shift+Enter or the button"
+                        interactive=True, placeholder="Enter your prompt here and press Ctrl/Cmd+Enter or the button"
                     ),
                     gr.update(interactive=True, visible=True),
                     gr.update(visible=False),
