@@ -55,7 +55,53 @@ ERRORS = {
 DEFAULT_MAX_LEN_OUTPUT = 50000
 MAX_OPERATIONS = 10000000
 MAX_WHILE_ITERATIONS = 1000000
-ALLOWED_DUNDER_METHODS = ["__init__", "__str__", "__repr__"]
+ALLOWED_DUNDER_METHODS = [
+    "__init__",
+    "__str__",
+    "__repr__",
+    "__enter__",
+    "__exit__",
+    "__getitem__",
+    "__setitem__",
+    "__delitem__",
+    "__len__",
+    "__iter__",
+    "__next__",
+    "__call__",
+    "__bool__",
+    "__eq__",
+    "__ne__",
+    "__lt__",
+    "__le__",
+    "__gt__",
+    "__ge__",
+    "__add__",
+    "__sub__",
+    "__mul__",
+    "__truediv__",
+    "__floordiv__",
+    "__mod__",
+    "__pow__",
+    "__and__",
+    "__or__",
+    "__xor__",
+    "__lshift__",
+    "__rshift__",
+    "__iadd__",
+    "__isub__",
+    "__imul__",
+    "__itruediv__",
+    "__ifloordiv__",
+    "__imod__",
+    "__ipow__",
+    "__iand__",
+    "__ior__",
+    "__ixor__",
+    "__ilshift__",
+    "__irshift__",
+    "__contains__",
+    "__hash__",
+]
 
 
 def custom_print(*args):
@@ -66,20 +112,36 @@ def is_dunder(name):
     return name.startswith("__") and name.endswith("__")
 
 
-def nodunder_getattr(obj, name, default=None):
-    if is_dunder(name):
+def check_dunder_name(name):
+    if is_dunder(name) and name not in ALLOWED_DUNDER_METHODS:
         raise InterpreterError(f"Forbidden access to dunder attribute: {name}")
+
+
+def check_arguments(arguments_node):
+    for arg in arguments_node.posonlyargs:
+        check_dunder_name(arg.arg)
+    for arg in arguments_node.args:
+        check_dunder_name(arg.arg)
+    if arguments_node.vararg:
+        check_dunder_name(arguments_node.vararg.arg)
+    for arg in arguments_node.kwonlyargs:
+        check_dunder_name(arg.arg)
+    if arguments_node.kwarg:
+        check_dunder_name(arguments_node.kwarg.arg)
+
+
+def nodunder_getattr(obj, name, default=None):
+    check_dunder_name(name)
     return getattr(obj, name, default)
 
 
 def nodunder_setattr(obj, name, value):
-    if is_dunder(name):
-        raise InterpreterError(f"Forbidden access to dunder attribute: {name}")
+    check_dunder_name(name)
     return setattr(obj, name, value)
 
 
 def nodunder_hasattr(obj, name):
-    if is_dunder(name):
+    if is_dunder(name) and name not in ALLOWED_DUNDER_METHODS:
         return False
     return hasattr(obj, name)
 
@@ -398,6 +460,7 @@ def evaluate_lambda(
     custom_tools: dict[str, Callable],
     authorized_imports: list[str],
 ) -> Callable:
+    check_arguments(lambda_expression.args)
     args = [arg.arg for arg in lambda_expression.args.args]
 
     def lambda_func(*values: Any) -> Any:
@@ -445,6 +508,7 @@ def create_function(
     authorized_imports: list[str],
 ) -> Callable:
     source_code = ast.unparse(func_def)
+    check_arguments(func_def.args)
 
     def new_func(*args: Any, **kwargs: Any) -> Any:
         func_state = state.copy()
@@ -511,6 +575,7 @@ def evaluate_function_def(
     custom_tools: dict[str, Callable],
     authorized_imports: list[str],
 ) -> Callable:
+    check_dunder_name(func_def.name)
     custom_tools[func_def.name] = create_function(func_def, state, static_tools, custom_tools, authorized_imports)
     return custom_tools[func_def.name]
 
@@ -523,6 +588,7 @@ def evaluate_class_def(
     authorized_imports: list[str],
 ) -> type:
     class_name = class_def.name
+    check_dunder_name(class_name)
     bases = [evaluate_ast(base, state, static_tools, custom_tools, authorized_imports) for base in class_def.bases]
 
     # Determine the metaclass to use
@@ -576,11 +642,11 @@ def evaluate_class_def(
             value = evaluate_ast(stmt.value, state, static_tools, custom_tools, authorized_imports)
             for target in stmt.targets:
                 if isinstance(target, ast.Name):
+                    check_dunder_name(target.id)
                     class_dict[target.id] = value
                 elif isinstance(target, ast.Attribute):
                     obj = evaluate_ast(target.value, class_dict, static_tools, custom_tools, authorized_imports)
-                    if is_dunder(target.attr):
-                        raise InterpreterError(f"Forbidden access to dunder attribute: {target.attr}")
+                    check_dunder_name(target.attr)
                     setattr(obj, target.attr, value)
         elif isinstance(stmt, ast.Pass):
             pass
@@ -784,6 +850,7 @@ def set_value(
     if isinstance(target, ast.Name):
         if target.id in static_tools:
             raise InterpreterError(f"Cannot assign to name '{target.id}': doing this would erase the existing tool!")
+        check_dunder_name(target.id)
         state[target.id] = value
     elif isinstance(target, ast.Tuple):
         if not isinstance(value, tuple):
@@ -929,6 +996,7 @@ def evaluate_name(
     custom_tools: dict[str, Callable],
     authorized_imports: list[str],
 ) -> Any:
+    check_dunder_name(name.id)
     if name.id in state:
         return state[name.id]
     elif name.id in static_tools:
@@ -1159,6 +1227,7 @@ def evaluate_try(
             ):
                 matched = True
                 if handler.name:
+                    check_dunder_name(handler.name)
                     state[handler.name] = e
                 for stmt in handler.body:
                     evaluate_ast(stmt, state, static_tools, custom_tools, authorized_imports)
@@ -1226,13 +1295,11 @@ def evaluate_with(
 ) -> None:
     contexts = []
     for item in with_node.items:
-        context_expr = evaluate_ast(item.context_expr, state, static_tools, custom_tools, authorized_imports)
+        context_manager = evaluate_ast(item.context_expr, state, static_tools, custom_tools, authorized_imports)
+        enter_result = context_manager.__enter__()
+        contexts.append(context_manager)
         if item.optional_vars:
-            state[item.optional_vars.id] = context_expr.__enter__()
-            contexts.append(state[item.optional_vars.id])
-        else:
-            context_var = context_expr.__enter__()
-            contexts.append(context_var)
+            set_value(item.optional_vars, enter_result, state, static_tools, custom_tools, authorized_imports)
 
     try:
         for stmt in with_node.body:
@@ -1288,6 +1355,7 @@ def evaluate_import(expression, state, static_tools, custom_tools, authorized_im
     if isinstance(expression, ast.Import):
         for alias in expression.names:
             if check_import_authorized(alias.name, authorized_imports):
+                check_dunder_name(alias.asname or alias.name)
                 raw_module = import_module(alias.name)
                 state[alias.asname or alias.name] = get_safe_module(raw_module, authorized_imports)
             else:
@@ -1309,8 +1377,8 @@ def evaluate_import(expression, state, static_tools, custom_tools, authorized_im
                             state[name] = getattr(module, name)
             else:  # regular from imports
                 for alias in expression.names:
-                    if is_dunder(alias.name):
-                        raise InterpreterError(f"Forbidden import of dunder name: {alias.name}")
+                    check_dunder_name(alias.name)
+                    check_dunder_name(alias.asname or alias.name)
                     if hasattr(module, alias.name):
                         state[alias.asname or alias.name] = getattr(module, alias.name)
                     else:
