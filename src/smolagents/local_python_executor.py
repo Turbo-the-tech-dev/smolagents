@@ -17,7 +17,6 @@
 import ast
 import builtins
 import difflib
-import inspect
 import logging
 import math
 import re
@@ -167,6 +166,16 @@ DANGEROUS_FUNCTIONS = [
 
 DANGEROUS_FUNCTIONS_NAMES = {func.split(".")[-1] for func in DANGEROUS_FUNCTIONS}
 
+FORBIDDEN_BUILTIN_FUNCTIONS = set()
+for qualified_function_name in DANGEROUS_FUNCTIONS:
+    module_name, function_name = qualified_function_name.rsplit(".", 1)
+    try:
+        module = import_module(module_name)
+        func = getattr(module, function_name)
+        FORBIDDEN_BUILTIN_FUNCTIONS.add((module_name, function_name))
+    except (ImportError, AttributeError):
+        continue
+
 
 def check_safer_result(result: Any, static_tools: dict[str, Callable] = None, authorized_imports: list[str] = None):
     """
@@ -191,14 +200,11 @@ def check_safer_result(result: Any, static_tools: dict[str, Callable] = None, au
     elif isinstance(result, (FunctionType, BuiltinFunctionType)):
         if result.__name__ not in DANGEROUS_FUNCTIONS_NAMES:
             return
-        for qualified_function_name in DANGEROUS_FUNCTIONS:
-            module_name, function_name = qualified_function_name.rsplit(".", 1)
-            if (
-                (static_tools is None or function_name not in static_tools)
-                and result.__name__ == function_name
-                and result.__module__ == module_name
-            ):
-                raise InterpreterError(f"Forbidden access to function: {function_name}")
+        if (
+            (static_tools is None or result.__name__ not in static_tools)
+            and (result.__module__, result.__name__) in FORBIDDEN_BUILTIN_FUNCTIONS
+        ):
+            raise InterpreterError(f"Forbidden access to function: {result.__name__}")
 
 
 def safer_eval(func: Callable):
@@ -371,6 +377,14 @@ def evaluate_attribute(
     return getattr(value, expression.attr)
 
 
+UNARYOP_HANDLERS = {
+    ast.USub: lambda x: -x,
+    ast.UAdd: lambda x: x,
+    ast.Not: lambda x: not x,
+    ast.Invert: lambda x: ~x,
+}
+
+
 def evaluate_unaryop(
     expression: ast.UnaryOp,
     state: dict[str, Any],
@@ -379,16 +393,10 @@ def evaluate_unaryop(
     authorized_imports: list[str],
 ) -> Any:
     operand = evaluate_ast(expression.operand, state, static_tools, custom_tools, authorized_imports)
-    if isinstance(expression.op, ast.USub):
-        return -operand
-    elif isinstance(expression.op, ast.UAdd):
-        return operand
-    elif isinstance(expression.op, ast.Not):
-        return not operand
-    elif isinstance(expression.op, ast.Invert):
-        return ~operand
-    else:
-        raise InterpreterError(f"Unary operation {expression.op.__class__.__name__} is not supported.")
+    handler = UNARYOP_HANDLERS.get(type(expression.op))
+    if handler:
+        return handler(operand)
+    raise InterpreterError(f"Unary operation {expression.op.__class__.__name__} is not supported.")
 
 
 def evaluate_lambda(
@@ -445,44 +453,38 @@ def create_function(
     authorized_imports: list[str],
 ) -> Callable:
     source_code = ast.unparse(func_def)
+    arg_names = [arg.arg for arg in func_def.args.args]
+    default_values = [
+        evaluate_ast(d, state, static_tools, custom_tools, authorized_imports) for d in func_def.args.defaults
+    ]
+    # Apply default values
+    defaults = dict(zip(arg_names[-len(default_values) :], default_values))
+    vararg_name = func_def.args.vararg.arg if func_def.args.vararg else None
+    kwarg_name = func_def.args.kwarg.arg if func_def.args.kwarg else None
+    is_method = arg_names[0] == "self" if arg_names else False
 
     def new_func(*args: Any, **kwargs: Any) -> Any:
         func_state = state.copy()
-        arg_names = [arg.arg for arg in func_def.args.args]
-        default_values = [
-            evaluate_ast(d, state, static_tools, custom_tools, authorized_imports) for d in func_def.args.defaults
-        ]
-
-        # Apply default values
-        defaults = dict(zip(arg_names[-len(default_values) :], default_values))
+        func_state.update(defaults)
 
         # Set positional arguments
         for name, value in zip(arg_names, args):
             func_state[name] = value
 
         # Set keyword arguments
-        for name, value in kwargs.items():
-            func_state[name] = value
+        func_state.update(kwargs)
 
         # Handle variable arguments
-        if func_def.args.vararg:
-            vararg_name = func_def.args.vararg.arg
+        if vararg_name:
             func_state[vararg_name] = args
 
-        if func_def.args.kwarg:
-            kwarg_name = func_def.args.kwarg.arg
+        if kwarg_name:
             func_state[kwarg_name] = kwargs
 
-        # Set default values for arguments that were not provided
-        for name, value in defaults.items():
-            if name not in func_state:
-                func_state[name] = value
-
         # Update function state with self and __class__
-        if func_def.args.args and func_def.args.args[0].arg == "self":
-            if args:
-                func_state["self"] = args[0]
-                func_state["__class__"] = args[0].__class__
+        if is_method and args:
+            func_state["self"] = args[0]
+            func_state["__class__"] = args[0].__class__
 
         result = None
         try:
@@ -709,6 +711,22 @@ def evaluate_boolop(
     return result
 
 
+BINOP_HANDLERS = {
+    ast.Add: lambda x, y: x + y,
+    ast.Sub: lambda x, y: x - y,
+    ast.Mult: lambda x, y: x * y,
+    ast.Div: lambda x, y: x / y,
+    ast.Mod: lambda x, y: x % y,
+    ast.Pow: lambda x, y: x**y,
+    ast.FloorDiv: lambda x, y: x // y,
+    ast.BitAnd: lambda x, y: x & y,
+    ast.BitOr: lambda x, y: x | y,
+    ast.BitXor: lambda x, y: x ^ y,
+    ast.LShift: lambda x, y: x << y,
+    ast.RShift: lambda x, y: x >> y,
+}
+
+
 def evaluate_binop(
     binop: ast.BinOp,
     state: dict[str, Any],
@@ -720,33 +738,10 @@ def evaluate_binop(
     left_val = evaluate_ast(binop.left, state, static_tools, custom_tools, authorized_imports)
     right_val = evaluate_ast(binop.right, state, static_tools, custom_tools, authorized_imports)
 
-    # Determine the operation based on the type of the operator in the BinOp
-    if isinstance(binop.op, ast.Add):
-        return left_val + right_val
-    elif isinstance(binop.op, ast.Sub):
-        return left_val - right_val
-    elif isinstance(binop.op, ast.Mult):
-        return left_val * right_val
-    elif isinstance(binop.op, ast.Div):
-        return left_val / right_val
-    elif isinstance(binop.op, ast.Mod):
-        return left_val % right_val
-    elif isinstance(binop.op, ast.Pow):
-        return left_val**right_val
-    elif isinstance(binop.op, ast.FloorDiv):
-        return left_val // right_val
-    elif isinstance(binop.op, ast.BitAnd):
-        return left_val & right_val
-    elif isinstance(binop.op, ast.BitOr):
-        return left_val | right_val
-    elif isinstance(binop.op, ast.BitXor):
-        return left_val ^ right_val
-    elif isinstance(binop.op, ast.LShift):
-        return left_val << right_val
-    elif isinstance(binop.op, ast.RShift):
-        return left_val >> right_val
-    else:
-        raise NotImplementedError(f"Binary operation {type(binop.op).__name__} is not implemented.")
+    handler = BINOP_HANDLERS.get(type(binop.op))
+    if handler:
+        return handler(left_val, right_val)
+    raise NotImplementedError(f"Binary operation {type(binop.op).__name__} is not implemented.")
 
 
 def evaluate_assign(
@@ -887,7 +882,13 @@ def evaluate_call(
         state["_print_outputs"] += " ".join(map(str, args)) + "\n"
         return None
     else:  # Assume it's a callable object
-        if (inspect.getmodule(func) == builtins) and inspect.isbuiltin(func) and (func not in static_tools.values()):
+        # Optimization: use isinstance(func, BuiltinFunctionType) instead of inspect.isbuiltin
+        # and check __module__ instead of inspect.getmodule
+        if (
+            isinstance(func, BuiltinFunctionType)
+            and getattr(func, "__module__", None) == "builtins"
+            and (func not in static_tools.values())
+        ):
             raise InterpreterError(
                 f"Invoking a builtin function that has not been explicitly added as a tool is not allowed ({func_name})."
             )
@@ -943,6 +944,20 @@ def evaluate_name(
     raise InterpreterError(f"The variable `{name.id}` is not defined.")
 
 
+CONDITION_HANDLERS = {
+    ast.Eq: lambda x, y: x == y,
+    ast.NotEq: lambda x, y: x != y,
+    ast.Lt: lambda x, y: x < y,
+    ast.LtE: lambda x, y: x <= y,
+    ast.Gt: lambda x, y: x > y,
+    ast.GtE: lambda x, y: x >= y,
+    ast.Is: lambda x, y: x is y,
+    ast.IsNot: lambda x, y: x is not y,
+    ast.In: lambda x, y: x in y,
+    ast.NotIn: lambda x, y: x not in y,
+}
+
+
 def evaluate_condition(
     condition: ast.Compare,
     state: dict[str, Any],
@@ -953,30 +968,12 @@ def evaluate_condition(
     result = True
     left = evaluate_ast(condition.left, state, static_tools, custom_tools, authorized_imports)
     for i, (op, comparator) in enumerate(zip(condition.ops, condition.comparators)):
-        op = type(op)
         right = evaluate_ast(comparator, state, static_tools, custom_tools, authorized_imports)
-        if op == ast.Eq:
-            current_result = left == right
-        elif op == ast.NotEq:
-            current_result = left != right
-        elif op == ast.Lt:
-            current_result = left < right
-        elif op == ast.LtE:
-            current_result = left <= right
-        elif op == ast.Gt:
-            current_result = left > right
-        elif op == ast.GtE:
-            current_result = left >= right
-        elif op == ast.Is:
-            current_result = left is right
-        elif op == ast.IsNot:
-            current_result = left is not right
-        elif op == ast.In:
-            current_result = left in right
-        elif op == ast.NotIn:
-            current_result = left not in right
+        handler = CONDITION_HANDLERS.get(type(op))
+        if handler:
+            current_result = handler(left, right)
         else:
-            raise InterpreterError(f"Unsupported comparison operator: {op}")
+            raise InterpreterError(f"Unsupported comparison operator: {type(op)}")
 
         if current_result is False:
             return False
@@ -1499,7 +1496,6 @@ if hasattr(ast, "Index"):
     NODE_HANDLERS[ast.Index] = lambda expr, *args: evaluate_ast(expr.value, *args)
 
 
-@safer_eval
 def evaluate_ast(
     expression: ast.AST,
     state: dict[str, Any],
@@ -1527,17 +1523,22 @@ def evaluate_ast(
             The list of modules that can be imported by the code. By default, only a few safe modules are allowed.
             If it contains "*", it will authorize any import. Use this at your own risk!
     """
-    if "_operations_count" not in state:
-        state["_operations_count"] = {"counter": 0}
+    try:
+        state["_operations_count"]["counter"] += 1
+    except KeyError:
+        state["_operations_count"] = {"counter": 1}
 
     if state["_operations_count"]["counter"] >= MAX_OPERATIONS:
         raise InterpreterError(
             f"Reached the max number of operations of {MAX_OPERATIONS}. Maybe there is an infinite loop somewhere in the code, or you're just asking too many calculations."
         )
-    state["_operations_count"]["counter"] += 1
+
     handler = NODE_HANDLERS.get(type(expression))
     if handler:
-        return handler(expression, state, static_tools, custom_tools, authorized_imports)
+        result = handler(expression, state, static_tools, custom_tools, authorized_imports)
+        if result is not None and not isinstance(result, (bool, int, float, str)):
+            check_safer_result(result, static_tools, authorized_imports)
+        return result
     # For now we refuse anything else. Let's add things as we need them.
     raise InterpreterError(f"{expression.__class__.__name__} is not supported.")
 
