@@ -55,7 +55,53 @@ ERRORS = {
 DEFAULT_MAX_LEN_OUTPUT = 50000
 MAX_OPERATIONS = 10000000
 MAX_WHILE_ITERATIONS = 1000000
-ALLOWED_DUNDER_METHODS = ["__init__", "__str__", "__repr__"]
+ALLOWED_DUNDER_METHODS = [
+    "__init__",
+    "__str__",
+    "__repr__",
+    "__iadd__",
+    "__isub__",
+    "__imul__",
+    "__itruediv__",
+    "__ifloordiv__",
+    "__imod__",
+    "__ipow__",
+    "__iand__",
+    "__ior__",
+    "__ixor__",
+    "__ilshift__",
+    "__irshift__",
+    "__eq__",
+    "__ne__",
+    "__lt__",
+    "__le__",
+    "__gt__",
+    "__ge__",
+    "__enter__",
+    "__exit__",
+    "__call__",
+    "__getitem__",
+    "__setitem__",
+    "__delitem__",
+    "__len__",
+    "__contains__",
+    "__iter__",
+    "__next__",
+    "__add__",
+    "__sub__",
+    "__mul__",
+    "__truediv__",
+    "__floordiv__",
+    "__mod__",
+    "__pow__",
+    "__and__",
+    "__or__",
+    "__xor__",
+    "__lshift__",
+    "__rshift__",
+    "__bool__",
+    "__hash__",
+]
 
 
 def custom_print(*args):
@@ -64,6 +110,17 @@ def custom_print(*args):
 
 def is_dunder(name):
     return name.startswith("__") and name.endswith("__")
+
+
+def check_dunder_name(name):
+    if is_dunder(name) and name not in ALLOWED_DUNDER_METHODS:
+        raise InterpreterError(f"Forbidden access to dunder attribute: {name}")
+
+
+def check_can_bind(name, static_tools):
+    check_dunder_name(name)
+    if name in static_tools:
+        raise InterpreterError(f"Cannot assign to name '{name}': doing this would erase the existing tool!")
 
 
 def nodunder_getattr(obj, name, default=None):
@@ -398,6 +455,13 @@ def evaluate_lambda(
     custom_tools: dict[str, Callable],
     authorized_imports: list[str],
 ) -> Callable:
+    for arg in lambda_expression.args.posonlyargs + lambda_expression.args.args + lambda_expression.args.kwonlyargs:
+        check_dunder_name(arg.arg)
+    if lambda_expression.args.vararg:
+        check_dunder_name(lambda_expression.args.vararg.arg)
+    if lambda_expression.args.kwarg:
+        check_dunder_name(lambda_expression.args.kwarg.arg)
+
     args = [arg.arg for arg in lambda_expression.args.args]
 
     def lambda_func(*values: Any) -> Any:
@@ -445,6 +509,14 @@ def create_function(
     authorized_imports: list[str],
 ) -> Callable:
     source_code = ast.unparse(func_def)
+
+    # Check that argument names are not dunder names
+    for arg in func_def.args.posonlyargs + func_def.args.args + func_def.args.kwonlyargs:
+        check_dunder_name(arg.arg)
+    if func_def.args.vararg:
+        check_dunder_name(func_def.args.vararg.arg)
+    if func_def.args.kwarg:
+        check_dunder_name(func_def.args.kwarg.arg)
 
     def new_func(*args: Any, **kwargs: Any) -> Any:
         func_state = state.copy()
@@ -511,6 +583,7 @@ def evaluate_function_def(
     custom_tools: dict[str, Callable],
     authorized_imports: list[str],
 ) -> Callable:
+    check_can_bind(func_def.name, static_tools)
     custom_tools[func_def.name] = create_function(func_def, state, static_tools, custom_tools, authorized_imports)
     return custom_tools[func_def.name]
 
@@ -523,6 +596,7 @@ def evaluate_class_def(
     authorized_imports: list[str],
 ) -> type:
     class_name = class_def.name
+    check_can_bind(class_name, static_tools)
     bases = [evaluate_ast(base, state, static_tools, custom_tools, authorized_imports) for base in class_def.bases]
 
     # Determine the metaclass to use
@@ -782,8 +856,7 @@ def set_value(
     authorized_imports: list[str],
 ) -> None:
     if isinstance(target, ast.Name):
-        if target.id in static_tools:
-            raise InterpreterError(f"Cannot assign to name '{target.id}': doing this would erase the existing tool!")
+        check_can_bind(target.id, static_tools)
         state[target.id] = value
     elif isinstance(target, ast.Tuple):
         if not isinstance(value, tuple):
@@ -1014,6 +1087,8 @@ def evaluate_for(
     custom_tools: dict[str, Callable],
     authorized_imports: list[str],
 ) -> Any:
+    if isinstance(for_loop.target, ast.Name):
+        check_can_bind(for_loop.target.id, static_tools)
     result = None
     iterator = evaluate_ast(for_loop.iter, state, static_tools, custom_tools, authorized_imports)
     for counter in iterator:
@@ -1087,6 +1162,9 @@ def evaluate_listcomp(
     custom_tools: dict[str, Callable],
     authorized_imports: list[str],
 ) -> list[Any]:
+    for gen in listcomp.generators:
+        if isinstance(gen.target, ast.Name):
+            check_can_bind(gen.target.id, static_tools)
     return list(
         _evaluate_comprehensions(
             listcomp.generators,
@@ -1106,6 +1184,9 @@ def evaluate_setcomp(
     custom_tools: dict[str, Callable],
     authorized_imports: list[str],
 ) -> set[Any]:
+    for gen in setcomp.generators:
+        if isinstance(gen.target, ast.Name):
+            check_can_bind(gen.target.id, static_tools)
     return set(
         _evaluate_comprehensions(
             setcomp.generators,
@@ -1125,6 +1206,9 @@ def evaluate_dictcomp(
     custom_tools: dict[str, Callable],
     authorized_imports: list[str],
 ) -> dict[Any, Any]:
+    for gen in dictcomp.generators:
+        if isinstance(gen.target, ast.Name):
+            check_can_bind(gen.target.id, static_tools)
     return dict(
         _evaluate_comprehensions(
             dictcomp.generators,
@@ -1159,6 +1243,7 @@ def evaluate_try(
             ):
                 matched = True
                 if handler.name:
+                    check_can_bind(handler.name, static_tools)
                     state[handler.name] = e
                 for stmt in handler.body:
                     evaluate_ast(stmt, state, static_tools, custom_tools, authorized_imports)
@@ -1228,6 +1313,7 @@ def evaluate_with(
     for item in with_node.items:
         context_expr = evaluate_ast(item.context_expr, state, static_tools, custom_tools, authorized_imports)
         if item.optional_vars:
+            check_can_bind(item.optional_vars.id, static_tools)
             state[item.optional_vars.id] = context_expr.__enter__()
             contexts.append(state[item.optional_vars.id])
         else:
@@ -1288,6 +1374,7 @@ def evaluate_import(expression, state, static_tools, custom_tools, authorized_im
     if isinstance(expression, ast.Import):
         for alias in expression.names:
             if check_import_authorized(alias.name, authorized_imports):
+                check_can_bind(alias.asname or alias.name, static_tools)
                 raw_module = import_module(alias.name)
                 state[alias.asname or alias.name] = get_safe_module(raw_module, authorized_imports)
             else:
@@ -1309,6 +1396,7 @@ def evaluate_import(expression, state, static_tools, custom_tools, authorized_im
                             state[name] = getattr(module, name)
             else:  # regular from imports
                 for alias in expression.names:
+                    check_can_bind(alias.asname or alias.name, static_tools)
                     if is_dunder(alias.name):
                         raise InterpreterError(f"Forbidden import of dunder name: {alias.name}")
                     if hasattr(module, alias.name):
@@ -1329,6 +1417,10 @@ def evaluate_generatorexp(
     custom_tools: dict[str, Callable],
     authorized_imports: list[str],
 ) -> Generator[Any]:
+    for gen in genexp.generators:
+        if isinstance(gen.target, ast.Name):
+            check_can_bind(gen.target.id, static_tools)
+
     def generator():
         for gen in genexp.generators:
             iter_value = evaluate_ast(gen.iter, state, static_tools, custom_tools, authorized_imports)
