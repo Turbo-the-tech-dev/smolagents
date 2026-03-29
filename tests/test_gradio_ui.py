@@ -359,6 +359,10 @@ class TestPullMessagesFromStep:
             assert messages[0].content["path"] == "path/to/image.png"
             assert messages[0].content["mime_type"] == "image/png"
 
+    @pytest.mark.skipif(
+        not (os.environ.get("TORCH_INSTALLED", "0") == "1" and os.environ.get("SOUNDFILE_INSTALLED", "0") == "1"),
+        reason="Audio dependencies not installed",
+    )
     def test_final_answer_step_audio(self):
         """Test FinalAnswerStep with audio answer."""
         with patch.object(AgentAudio, "to_string", return_value="path/to/audio.wav"):
