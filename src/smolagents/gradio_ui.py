@@ -473,7 +473,7 @@ class GradioUI:
                 ),
                 resizable=True,
                 scale=1,
-                buttons=["copy"],
+                buttons=["copy", "clear"],
                 latex_delimiters=[
                     {"left": r"$$", "right": r"$$", "display": True},
                     {"left": r"$", "right": r"$", "display": False},
@@ -518,7 +518,13 @@ class GradioUI:
 
             stop_btn.click(self.interrupt_agent, None, [stop_btn, submit_btn], cancels=[submit_event, click_event])
 
-            chatbot.clear(self.agent.memory.reset)
+            chatbot.clear(self.agent.memory.reset).then(
+                lambda _: ([], []),
+                outputs=[stored_messages, file_uploads_log],
+            ).then(
+                lambda _: (gr.update(visible=False), gr.update(interactive=True, visible=True)),
+                outputs=[stop_btn, submit_btn],
+            )
         return demo
 
 
