@@ -511,6 +511,8 @@ def evaluate_function_def(
     custom_tools: dict[str, Callable],
     authorized_imports: list[str],
 ) -> Callable:
+    if is_dunder(func_def.name):
+        raise InterpreterError(f"Forbidden access to dunder attribute: {func_def.name}")
     custom_tools[func_def.name] = create_function(func_def, state, static_tools, custom_tools, authorized_imports)
     return custom_tools[func_def.name]
 
@@ -523,6 +525,8 @@ def evaluate_class_def(
     authorized_imports: list[str],
 ) -> type:
     class_name = class_def.name
+    if is_dunder(class_name):
+        raise InterpreterError(f"Forbidden access to dunder attribute: {class_name}")
     bases = [evaluate_ast(base, state, static_tools, custom_tools, authorized_imports) for base in class_def.bases]
 
     # Determine the metaclass to use
@@ -542,7 +546,7 @@ def evaluate_class_def(
 
     for stmt in class_def.body:
         if isinstance(stmt, ast.FunctionDef):
-            class_dict[stmt.name] = evaluate_ast(stmt, state, static_tools, custom_tools, authorized_imports)
+            class_dict[stmt.name] = create_function(stmt, state, static_tools, custom_tools, authorized_imports)
         elif isinstance(stmt, ast.AnnAssign):
             if stmt.value:
                 value = evaluate_ast(stmt.value, state, static_tools, custom_tools, authorized_imports)
@@ -782,6 +786,8 @@ def set_value(
     authorized_imports: list[str],
 ) -> None:
     if isinstance(target, ast.Name):
+        if is_dunder(target.id):
+            raise InterpreterError(f"Forbidden access to dunder attribute: {target.id}")
         if target.id in static_tools:
             raise InterpreterError(f"Cannot assign to name '{target.id}': doing this would erase the existing tool!")
         state[target.id] = value
@@ -1228,11 +1234,11 @@ def evaluate_with(
     for item in with_node.items:
         context_expr = evaluate_ast(item.context_expr, state, static_tools, custom_tools, authorized_imports)
         if item.optional_vars:
-            state[item.optional_vars.id] = context_expr.__enter__()
-            contexts.append(state[item.optional_vars.id])
+            set_value(item.optional_vars, context_expr.__enter__(), state, static_tools, custom_tools, authorized_imports)
+            contexts.append(context_expr)
         else:
-            context_var = context_expr.__enter__()
-            contexts.append(context_var)
+            context_expr.__enter__()
+            contexts.append(context_expr)
 
     try:
         for stmt in with_node.body:
@@ -1287,6 +1293,10 @@ def get_safe_module(raw_module, authorized_imports, visited=None):
 def evaluate_import(expression, state, static_tools, custom_tools, authorized_imports):
     if isinstance(expression, ast.Import):
         for alias in expression.names:
+            if is_dunder(alias.name):
+                raise InterpreterError(f"Forbidden access to dunder attribute: {alias.name}")
+            if alias.asname and is_dunder(alias.asname):
+                raise InterpreterError(f"Forbidden access to dunder attribute: {alias.asname}")
             if check_import_authorized(alias.name, authorized_imports):
                 raw_module = import_module(alias.name)
                 state[alias.asname or alias.name] = get_safe_module(raw_module, authorized_imports)
@@ -1302,15 +1312,21 @@ def evaluate_import(expression, state, static_tools, custom_tools, authorized_im
             if expression.names[0].name == "*":  # Handle "from module import *"
                 if hasattr(module, "__all__"):  # If module has __all__, import only those names
                     for name in module.__all__:
+                        if is_dunder(name):
+                            continue
                         state[name] = getattr(module, name)
                 else:  # If no __all__, import all public names (those not starting with '_')
                     for name in dir(module):
                         if not name.startswith("_"):
+                            if is_dunder(name):
+                                continue
                             state[name] = getattr(module, name)
             else:  # regular from imports
                 for alias in expression.names:
                     if is_dunder(alias.name):
-                        raise InterpreterError(f"Forbidden import of dunder name: {alias.name}")
+                        raise InterpreterError(f"Forbidden access to dunder attribute: {alias.name}")
+                    if alias.asname and is_dunder(alias.asname):
+                        raise InterpreterError(f"Forbidden access to dunder attribute: {alias.asname}")
                     if hasattr(module, alias.name):
                         state[alias.asname or alias.name] = getattr(module, alias.name)
                     else:
@@ -1421,6 +1437,8 @@ def evaluate_delete(
     for target in delete_node.targets:
         if isinstance(target, ast.Name):
             # Handle simple variable deletion (del x)
+            if is_dunder(target.id):
+                raise InterpreterError(f"Forbidden access to dunder attribute: {target.id}")
             if target.id in state:
                 del state[target.id]
             else:
