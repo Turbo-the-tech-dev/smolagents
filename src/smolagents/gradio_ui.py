@@ -32,7 +32,7 @@ def get_step_footnote_content(step_log: ActionStep | PlanningStep, step_name: st
     if step_log.token_usage is not None:
         step_footnote += f" | Input tokens: {step_log.token_usage.input_tokens:,} | Output tokens: {step_log.token_usage.output_tokens:,}"
     step_footnote += f" | Duration: {round(float(step_log.timing.duration), 2)}s" if step_log.timing.duration else ""
-    step_footnote_content = f"""<span style="color: #bbbbc2; font-size: 12px;">{step_footnote}</span> """
+    step_footnote_content = f"""<span style="color: #616161; font-size: 12px;">{step_footnote}</span> """
     return step_footnote_content
 
 
@@ -400,7 +400,7 @@ class GradioUI:
                 else ""
             ),
             "",
-            [],
+            file_uploads_log,
             gr.update(visible=False, interactive=False),
             gr.update(visible=True, interactive=True),
         )
@@ -443,9 +443,11 @@ class GradioUI:
                     text_input = gr.Textbox(
                         lines=3,
                         label="Chat Message",
+                        show_label=False,
                         container=False,
                         placeholder="Enter your prompt here and press Shift+Enter or press the button",
                         autofocus=True,
+                        html_attributes={"aria-label": "Chat Message"},
                     )
                     submit_btn = gr.Button("🚀 Submit", variant="primary")
                     stop_btn = gr.Button("🛑 Stop", variant="danger", visible=False)
@@ -473,7 +475,7 @@ class GradioUI:
                 ),
                 resizable=True,
                 scale=1,
-                buttons=["copy"],
+                buttons=["copy", "clear"],
                 latex_delimiters=[
                     {"left": r"$$", "right": r"$$", "display": True},
                     {"left": r"$", "right": r"$", "display": False},
@@ -518,7 +520,21 @@ class GradioUI:
 
             stop_btn.click(self.interrupt_agent, None, [stop_btn, submit_btn], cancels=[submit_event, click_event])
 
-            chatbot.clear(self.agent.memory.reset)
+            chatbot_clear_outputs = [stored_messages, file_uploads_log]
+            if self.file_upload_folder is not None:
+                chatbot_clear_outputs.append(upload_status)
+
+            def reset_ui_state():
+                outputs = [[], []]
+                if self.file_upload_folder is not None:
+                    outputs.append(gr.update(value="", visible=False))
+                return outputs
+
+            chatbot.clear(self.agent.memory.reset).then(
+                reset_ui_state,
+                None,
+                chatbot_clear_outputs,
+            )
         return demo
 
 
