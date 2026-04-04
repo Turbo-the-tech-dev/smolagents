@@ -56,6 +56,7 @@ DEFAULT_MAX_LEN_OUTPUT = 50000
 MAX_OPERATIONS = 10000000
 MAX_WHILE_ITERATIONS = 1000000
 ALLOWED_DUNDER_METHODS = ["__init__", "__str__", "__repr__"]
+INTERNAL_PROTECTED_NAMES = ["_operations_count", "_print_outputs"]
 
 
 def custom_print(*args):
@@ -784,6 +785,10 @@ def set_value(
     if isinstance(target, ast.Name):
         if target.id in static_tools:
             raise InterpreterError(f"Cannot assign to name '{target.id}': doing this would erase the existing tool!")
+        if target.id in INTERNAL_PROTECTED_NAMES:
+            raise InterpreterError(f"Cannot assign to protected name '{target.id}'")
+        if is_dunder(target.id):
+            raise InterpreterError(f"Forbidden access to dunder attribute: {target.id}")
         state[target.id] = value
     elif isinstance(target, ast.Tuple):
         if not isinstance(value, tuple):
@@ -929,6 +934,10 @@ def evaluate_name(
     custom_tools: dict[str, Callable],
     authorized_imports: list[str],
 ) -> Any:
+    if name.id in INTERNAL_PROTECTED_NAMES:
+        raise InterpreterError(f"Forbidden access to protected name: {name.id}")
+    if is_dunder(name.id):
+        raise InterpreterError(f"Forbidden access to dunder attribute: {name.id}")
     if name.id in state:
         return state[name.id]
     elif name.id in static_tools:
@@ -1159,6 +1168,8 @@ def evaluate_try(
             ):
                 matched = True
                 if handler.name:
+                    if is_dunder(handler.name) or handler.name in INTERNAL_PROTECTED_NAMES:
+                        raise InterpreterError(f"Forbidden assignment to name: {handler.name}")
                     state[handler.name] = e
                 for stmt in handler.body:
                     evaluate_ast(stmt, state, static_tools, custom_tools, authorized_imports)
@@ -1228,8 +1239,17 @@ def evaluate_with(
     for item in with_node.items:
         context_expr = evaluate_ast(item.context_expr, state, static_tools, custom_tools, authorized_imports)
         if item.optional_vars:
-            state[item.optional_vars.id] = context_expr.__enter__()
-            contexts.append(state[item.optional_vars.id])
+            if isinstance(item.optional_vars, ast.Name):
+                if is_dunder(item.optional_vars.id) or item.optional_vars.id in INTERNAL_PROTECTED_NAMES:
+                    raise InterpreterError(f"Forbidden assignment to name: {item.optional_vars.id}")
+                state[item.optional_vars.id] = context_expr.__enter__()
+                contexts.append(state[item.optional_vars.id])
+            else:
+                context_var = context_expr.__enter__()
+                set_value(
+                    item.optional_vars, context_var, state, static_tools, custom_tools, authorized_imports
+                )
+                contexts.append(context_var)
         else:
             context_var = context_expr.__enter__()
             contexts.append(context_var)
