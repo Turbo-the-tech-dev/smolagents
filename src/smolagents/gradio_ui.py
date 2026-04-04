@@ -400,7 +400,7 @@ class GradioUI:
                 else ""
             ),
             "",
-            [],
+            file_uploads_log,
             gr.update(visible=False, interactive=False),
             gr.update(visible=True, interactive=True),
         )
@@ -411,6 +411,20 @@ class GradioUI:
         if hasattr(self.agent, "interrupt"):
             self.agent.interrupt()
         return gr.update(visible=False), gr.update(interactive=True, visible=True)
+
+    def reset_ui_state(self, file_upload_folder_is_not_none: bool = False):
+        import gradio as gr
+
+        if file_upload_folder_is_not_none:
+            return (
+                [],  # stored_messages
+                [],  # file_uploads_log
+                gr.update(visible=False),  # upload_status
+            )
+        return (
+            [],  # stored_messages
+            [],  # file_uploads_log
+        )
 
     def launch(self, share: bool = True, **kwargs):
         """
@@ -432,6 +446,12 @@ class GradioUI:
             file_uploads_log = gr.State([])
 
             with gr.Sidebar():
+                gr.Image(
+                    "https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/smolagents/mascot_smol.png",
+                    show_label=False,
+                    container=False,
+                    width=64,
+                )
                 gr.Markdown(
                     f"# {self.name.replace('_', ' ').capitalize()}"
                     "\n> This web ui allows you to interact with a `smolagents` agent that can use tools and execute steps to complete tasks."
@@ -443,9 +463,11 @@ class GradioUI:
                     text_input = gr.Textbox(
                         lines=3,
                         label="Chat Message",
+                        show_label=False,
                         container=False,
                         placeholder="Enter your prompt here and press Shift+Enter or press the button",
                         autofocus=True,
+                        html_attributes={"aria-label": "Chat Message"},
                     )
                     submit_btn = gr.Button("🚀 Submit", variant="primary")
                     stop_btn = gr.Button("🛑 Stop", variant="danger", visible=False)
@@ -461,7 +483,7 @@ class GradioUI:
                     )
 
                 gr.HTML(
-                    "<br><br><h4><center>Powered by <a target='_blank' href='https://github.com/huggingface/smolagents'><b>smolagents</b></a></center></h4>"
+                    "<br><br><h4 style='text-align: center;'>Powered by <a target='_blank' href='https://github.com/huggingface/smolagents'><b>smolagents</b></a></h4>"
                 )
 
             # Main chat interface
@@ -473,7 +495,7 @@ class GradioUI:
                 ),
                 resizable=True,
                 scale=1,
-                buttons=["copy"],
+                buttons=["copy", "clear"],
                 latex_delimiters=[
                     {"left": r"$$", "right": r"$$", "display": True},
                     {"left": r"$", "right": r"$", "display": False},
@@ -518,7 +540,13 @@ class GradioUI:
 
             stop_btn.click(self.interrupt_agent, None, [stop_btn, submit_btn], cancels=[submit_event, click_event])
 
-            chatbot.clear(self.agent.memory.reset)
+            chatbot.clear(self.agent.memory.reset).then(
+                lambda: self.reset_ui_state(self.file_upload_folder is not None),
+                None,
+                [stored_messages, file_uploads_log, upload_status]
+                if self.file_upload_folder is not None
+                else [stored_messages, file_uploads_log],
+            )
         return demo
 
 
