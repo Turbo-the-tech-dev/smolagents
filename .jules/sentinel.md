@@ -1,4 +1,4 @@
-## 2025-05-22 - [Hardening Local Python Executor against Dunder Attribute Manipulation]
-**Vulnerability:** The local Python executor allowed modification and deletion of dunder attributes (e.g., `__init__`, `__class__`) on objects.
-**Learning:** While `nodunder_getattr` existed to prevent reading dunder attributes, it didn't prevent assignment or deletion. Attackers could use this to override object methods or change an object's class to escape the sandbox.
-**Prevention:** Centralized dunder check in `is_dunder` and applied it to attribute assignment in `set_value` and `evaluate_class_def`, and to attribute deletion in `evaluate_delete`. Also wrapped `setattr` and `delattr` with dunder checks.
+## 2025-05-15 - Centralized Identifier Validation in LocalPythonExecutor
+**Vulnerability:** Internal interpreter state variables (`_operations_count`, `_print_outputs`) were accessible and modifiable by guest code, potentially allowing sandbox escapes (e.g. infinite loops by resetting counter) or data tampering.
+**Learning:** In AST-based interpreters, name binding happens at multiple points (assignments, imports, exception handlers, context managers). Relying on disparate checks at each point is error-prone.
+**Prevention:** Implement a centralized `check_dunder_name` helper that is called at all name-binding and name-lookup nodes in the AST to enforce a uniform security policy across the sandbox.
