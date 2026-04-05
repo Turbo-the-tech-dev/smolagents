@@ -887,7 +887,11 @@ def evaluate_call(
         state["_print_outputs"] += " ".join(map(str, args)) + "\n"
         return None
     else:  # Assume it's a callable object
-        if (inspect.getmodule(func) == builtins) and inspect.isbuiltin(func) and (func not in static_tools.values()):
+        if (
+            getattr(func, "__module__", None) == "builtins"
+            and isinstance(func, BuiltinFunctionType)
+            and (func not in state.get("_static_tools_values", []))
+        ):
             raise InterpreterError(
                 f"Invoking a builtin function that has not been explicitly added as a tool is not allowed ({func_name})."
             )
@@ -1529,6 +1533,8 @@ def evaluate_ast(
     """
     if "_operations_count" not in state:
         state["_operations_count"] = {"counter": 0}
+    if "_static_tools_values" not in state:
+        state["_static_tools_values"] = set(static_tools.values())
 
     if state["_operations_count"]["counter"] >= MAX_OPERATIONS:
         raise InterpreterError(
@@ -1591,6 +1597,7 @@ def evaluate_python_code(
     result = None
     state["_print_outputs"] = PrintContainer()
     state["_operations_count"] = {"counter": 0}
+    state["_static_tools_values"] = set(static_tools.values())
 
     if "final_answer" in static_tools:
         previous_final_answer = static_tools["final_answer"]
@@ -1621,6 +1628,8 @@ def evaluate_python_code(
         raise InterpreterError(
             f"Code execution failed at line '{ast.get_source_segment(code, node)}' due to: {type(e).__name__}: {e}"
         )
+    finally:
+        state.pop("_static_tools_values", None)
 
 
 @dataclass
