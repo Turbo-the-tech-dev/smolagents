@@ -17,7 +17,6 @@
 import ast
 import builtins
 import difflib
-import inspect
 import logging
 import math
 import re
@@ -252,6 +251,8 @@ def safer_func(
     @wraps(func)
     def _check_return(*args, **kwargs):
         result = func(*args, **kwargs)
+        if result is None or isinstance(result, (bool, int, float, str)):
+            return result
         check_safer_result(result, static_tools, authorized_imports)
         return result
 
@@ -887,7 +888,8 @@ def evaluate_call(
         state["_print_outputs"] += " ".join(map(str, args)) + "\n"
         return None
     else:  # Assume it's a callable object
-        if (inspect.getmodule(func) == builtins) and inspect.isbuiltin(func) and (func not in static_tools.values()):
+        is_builtin = isinstance(func, BuiltinFunctionType) and getattr(func, "__module__", None) == "builtins"
+        if is_builtin and (func not in state.get("_static_tools_values", set())):
             raise InterpreterError(
                 f"Invoking a builtin function that has not been explicitly added as a tool is not allowed ({func_name})."
             )
@@ -1600,26 +1602,25 @@ def evaluate_python_code(
 
         static_tools["final_answer"] = final_answer
 
+    state["_static_tools_values"] = set(static_tools.values())
+
     try:
-        for node in expression.body:
-            result = evaluate_ast(node, state, static_tools, custom_tools, authorized_imports)
+        try:
+            for node in expression.body:
+                result = evaluate_ast(node, state, static_tools, custom_tools, authorized_imports)
+            is_final_answer = False
+            return result, is_final_answer
+        except FinalAnswerException as e:
+            is_final_answer = True
+            return e.value, is_final_answer
+        except Exception as e:
+            raise InterpreterError(
+                f"Code execution failed at line '{ast.get_source_segment(code, node)}' due to: {type(e).__name__}: {e}"
+            )
+    finally:
+        state.pop("_static_tools_values", None)
         state["_print_outputs"].value = truncate_content(
             str(state["_print_outputs"]), max_length=max_print_outputs_length
-        )
-        is_final_answer = False
-        return result, is_final_answer
-    except FinalAnswerException as e:
-        state["_print_outputs"].value = truncate_content(
-            str(state["_print_outputs"]), max_length=max_print_outputs_length
-        )
-        is_final_answer = True
-        return e.value, is_final_answer
-    except Exception as e:
-        state["_print_outputs"].value = truncate_content(
-            str(state["_print_outputs"]), max_length=max_print_outputs_length
-        )
-        raise InterpreterError(
-            f"Code execution failed at line '{ast.get_source_segment(code, node)}' due to: {type(e).__name__}: {e}"
         )
 
 
