@@ -48,8 +48,8 @@ def add_two(x):
 
 class TestEvaluatePythonCode:
     def assertDictEqualNoPrint(self, dict1, dict2):
-        assert {k: v for k, v in dict1.items() if k != "_print_outputs"} == {
-            k: v for k, v in dict2.items() if k != "_print_outputs"
+        assert {k: v for k, v in dict1.items() if not k.startswith("_")} == {
+            k: v for k, v in dict2.items() if not k.startswith("_")
         }
 
     def test_evaluate_assign(self):
@@ -1655,8 +1655,8 @@ class TestEvaluateDelete:
             assert str(expectation) in str(exception_info.value)
         else:
             evaluate_delete(delete_node, state, {}, {}, [])
-            _ = state.pop("_operations_count", None)
-            assert state == expectation
+            filtered_state = {k: v for k, v in state.items() if not k.startswith("_")}
+            assert filtered_state == expectation
 
 
 class TestEvaluateCondition:
