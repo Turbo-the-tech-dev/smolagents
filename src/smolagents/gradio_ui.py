@@ -420,18 +420,25 @@ class GradioUI:
             share (`bool`, defaults to `True`): Whether to share the app publicly.
             **kwargs: Additional keyword arguments to pass to the Gradio launch method.
         """
-        self.create_app().launch(debug=True, share=share, **kwargs)
+        self.create_app().launch(theme="ocean", debug=True, share=share, **kwargs)
 
     def create_app(self):
         import gradio as gr
 
-        with gr.Blocks(theme="ocean", fill_height=True) as demo:
+        with gr.Blocks(fill_height=True) as demo:
             # Add session state to store session-specific data
             session_state = gr.State({})
             stored_messages = gr.State([])
             file_uploads_log = gr.State([])
 
             with gr.Sidebar():
+                gr.Image(
+                    "https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/smolagents/mascot_smol.png",
+                    width=100,
+                    container=False,
+                    show_label=False,
+                    interactive=False,
+                )
                 gr.Markdown(
                     f"# {self.name.replace('_', ' ').capitalize()}"
                     "\n> This web ui allows you to interact with a `smolagents` agent that can use tools and execute steps to complete tasks."
