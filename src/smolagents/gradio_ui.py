@@ -430,6 +430,7 @@ class GradioUI:
             session_state = gr.State({})
             stored_messages = gr.State([])
             file_uploads_log = gr.State([])
+            upload_status = None
 
             with gr.Sidebar():
                 gr.Markdown(
@@ -484,41 +485,69 @@ class GradioUI:
             )
 
             # Set up event handlers
-            submit_event = text_input.submit(
-                self.log_user_message,
-                [text_input, file_uploads_log],
-                [stored_messages, text_input, file_uploads_log, submit_btn, stop_btn],
-            ).then(self.interact_with_agent, [stored_messages, chatbot, session_state], [chatbot]).then(
-                lambda: (
-                    gr.update(
-                        interactive=True, placeholder="Enter your prompt here and press Shift+Enter or the button"
+            submit_event = (
+                text_input.submit(
+                    self.log_user_message,
+                    [text_input, file_uploads_log],
+                    [stored_messages, text_input, file_uploads_log, submit_btn, stop_btn],
+                )
+                .then(self.interact_with_agent, [stored_messages, chatbot, session_state], [chatbot])
+                .then(
+                    lambda: (
+                        gr.update(
+                            interactive=True, placeholder="Enter your prompt here and press Shift+Enter or the button"
+                        ),
+                        gr.update(interactive=True, visible=True),
+                        gr.update(visible=False),
                     ),
-                    gr.update(interactive=True, visible=True),
-                    gr.update(visible=False),
-                ),
-                None,
-                [text_input, submit_btn, stop_btn],
+                    None,
+                    [text_input, submit_btn, stop_btn],
+                )
             )
 
-            click_event = submit_btn.click(
-                self.log_user_message,
-                [text_input, file_uploads_log],
-                [stored_messages, text_input, file_uploads_log, submit_btn, stop_btn],
-            ).then(self.interact_with_agent, [stored_messages, chatbot, session_state], [chatbot]).then(
-                lambda: (
-                    gr.update(
-                        interactive=True, placeholder="Enter your prompt here and press Shift+Enter or the button"
+            click_event = (
+                submit_btn.click(
+                    self.log_user_message,
+                    [text_input, file_uploads_log],
+                    [stored_messages, text_input, file_uploads_log, submit_btn, stop_btn],
+                )
+                .then(self.interact_with_agent, [stored_messages, chatbot, session_state], [chatbot])
+                .then(
+                    lambda: (
+                        gr.update(
+                            interactive=True, placeholder="Enter your prompt here and press Shift+Enter or the button"
+                        ),
+                        gr.update(interactive=True, visible=True),
+                        gr.update(visible=False),
                     ),
-                    gr.update(interactive=True, visible=True),
-                    gr.update(visible=False),
-                ),
-                None,
-                [text_input, submit_btn, stop_btn],
+                    None,
+                    [text_input, submit_btn, stop_btn],
+                )
             )
 
             stop_btn.click(self.interrupt_agent, None, [stop_btn, submit_btn], cancels=[submit_event, click_event])
 
-            chatbot.clear(self.agent.memory.reset)
+            def reset_ui_state():
+                return (
+                    [],
+                    [],
+                    gr.update(visible=False),
+                    gr.update(interactive=True, visible=True),
+                    gr.update(visible=False),
+                )
+
+            if self.file_upload_folder is not None:
+                chatbot.clear(self.agent.memory.reset).then(
+                    reset_ui_state,
+                    None,
+                    [stored_messages, file_uploads_log, upload_status, submit_btn, stop_btn],
+                )
+            else:
+                chatbot.clear(self.agent.memory.reset).then(
+                    lambda: ([], [], gr.update(interactive=True, visible=True), gr.update(visible=False)),
+                    None,
+                    [stored_messages, file_uploads_log, submit_btn, stop_btn],
+                )
         return demo
 
 
