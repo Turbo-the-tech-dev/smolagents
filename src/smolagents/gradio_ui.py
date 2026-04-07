@@ -400,7 +400,7 @@ class GradioUI:
                 else ""
             ),
             "",
-            [],
+            file_uploads_log,
             gr.update(visible=False, interactive=False),
             gr.update(visible=True, interactive=True),
         )
@@ -411,6 +411,13 @@ class GradioUI:
         if hasattr(self.agent, "interrupt"):
             self.agent.interrupt()
         return gr.update(visible=False), gr.update(interactive=True, visible=True)
+
+    def reset_ui_state(self):
+        import gradio as gr
+
+        if self.file_upload_folder is not None:
+            return [], [], gr.update(value="No file uploaded", visible=False)
+        return [], []
 
     def launch(self, share: bool = True, **kwargs):
         """
@@ -432,6 +439,13 @@ class GradioUI:
             file_uploads_log = gr.State([])
 
             with gr.Sidebar():
+                gr.Image(
+                    "https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/smolagents/mascot_smol.png",
+                    interactive=False,
+                    label="smolagents mascot",
+                    container=False,
+                    show_label=False,
+                )
                 gr.Markdown(
                     f"# {self.name.replace('_', ' ').capitalize()}"
                     "\n> This web ui allows you to interact with a `smolagents` agent that can use tools and execute steps to complete tasks."
@@ -442,7 +456,8 @@ class GradioUI:
                     gr.Markdown("**Your request**", container=True)
                     text_input = gr.Textbox(
                         lines=3,
-                        label="Chat Message",
+                        label="Agent prompt",
+                        show_label=False,
                         container=False,
                         placeholder="Enter your prompt here and press Shift+Enter or press the button",
                         autofocus=True,
@@ -451,6 +466,7 @@ class GradioUI:
                     stop_btn = gr.Button("🛑 Stop", variant="danger", visible=False)
 
                 # If an upload folder is provided, enable the upload feature
+                upload_status = None
                 if self.file_upload_folder is not None:
                     upload_file = gr.File(label="Upload a file")
                     upload_status = gr.Textbox(label="Upload Status", interactive=False, visible=False)
@@ -518,7 +534,11 @@ class GradioUI:
 
             stop_btn.click(self.interrupt_agent, None, [stop_btn, submit_btn], cancels=[submit_event, click_event])
 
-            chatbot.clear(self.agent.memory.reset)
+            clear_event = chatbot.clear(self.agent.memory.reset)
+            if upload_status is not None:
+                clear_event.then(self.reset_ui_state, None, [stored_messages, file_uploads_log, upload_status])
+            else:
+                clear_event.then(self.reset_ui_state, None, [stored_messages, file_uploads_log])
         return demo
 
 
