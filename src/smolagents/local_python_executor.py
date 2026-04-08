@@ -445,16 +445,15 @@ def create_function(
     authorized_imports: list[str],
 ) -> Callable:
     source_code = ast.unparse(func_def)
+    arg_names = [arg.arg for arg in func_def.args.args]
+    default_values = [
+        evaluate_ast(d, state, static_tools, custom_tools, authorized_imports) for d in func_def.args.defaults
+    ]
+    # Apply default values
+    defaults = dict(zip(arg_names[-len(default_values) :], default_values))
 
     def new_func(*args: Any, **kwargs: Any) -> Any:
         func_state = state.copy()
-        arg_names = [arg.arg for arg in func_def.args.args]
-        default_values = [
-            evaluate_ast(d, state, static_tools, custom_tools, authorized_imports) for d in func_def.args.defaults
-        ]
-
-        # Apply default values
-        defaults = dict(zip(arg_names[-len(default_values) :], default_values))
 
         # Set positional arguments
         for name, value in zip(arg_names, args):
@@ -887,7 +886,11 @@ def evaluate_call(
         state["_print_outputs"] += " ".join(map(str, args)) + "\n"
         return None
     else:  # Assume it's a callable object
-        if (inspect.getmodule(func) == builtins) and inspect.isbuiltin(func) and (func not in static_tools.values()):
+        if (
+            isinstance(func, BuiltinFunctionType)
+            and getattr(func, "__module__", None) == "builtins"
+            and (func not in state["_static_tools_values"])
+        ):
             raise InterpreterError(
                 f"Invoking a builtin function that has not been explicitly added as a tool is not allowed ({func_name})."
             )
@@ -1529,6 +1532,8 @@ def evaluate_ast(
     """
     if "_operations_count" not in state:
         state["_operations_count"] = {"counter": 0}
+    if "_static_tools_values" not in state:
+        state["_static_tools_values"] = set(static_tools.values())
 
     if state["_operations_count"]["counter"] >= MAX_OPERATIONS:
         raise InterpreterError(
@@ -1591,7 +1596,9 @@ def evaluate_python_code(
     result = None
     state["_print_outputs"] = PrintContainer()
     state["_operations_count"] = {"counter": 0}
+    state["_static_tools_values"] = set(static_tools.values())
 
+    previous_final_answer = None
     if "final_answer" in static_tools:
         previous_final_answer = static_tools["final_answer"]
 
@@ -1601,26 +1608,31 @@ def evaluate_python_code(
         static_tools["final_answer"] = final_answer
 
     try:
-        for node in expression.body:
-            result = evaluate_ast(node, state, static_tools, custom_tools, authorized_imports)
-        state["_print_outputs"].value = truncate_content(
-            str(state["_print_outputs"]), max_length=max_print_outputs_length
-        )
-        is_final_answer = False
-        return result, is_final_answer
-    except FinalAnswerException as e:
-        state["_print_outputs"].value = truncate_content(
-            str(state["_print_outputs"]), max_length=max_print_outputs_length
-        )
-        is_final_answer = True
-        return e.value, is_final_answer
-    except Exception as e:
-        state["_print_outputs"].value = truncate_content(
-            str(state["_print_outputs"]), max_length=max_print_outputs_length
-        )
-        raise InterpreterError(
-            f"Code execution failed at line '{ast.get_source_segment(code, node)}' due to: {type(e).__name__}: {e}"
-        )
+        try:
+            for node in expression.body:
+                result = evaluate_ast(node, state, static_tools, custom_tools, authorized_imports)
+            state["_print_outputs"].value = truncate_content(
+                str(state["_print_outputs"]), max_length=max_print_outputs_length
+            )
+            is_final_answer = False
+            return result, is_final_answer
+        except FinalAnswerException as e:
+            state["_print_outputs"].value = truncate_content(
+                str(state["_print_outputs"]), max_length=max_print_outputs_length
+            )
+            is_final_answer = True
+            return e.value, is_final_answer
+        except Exception as e:
+            state["_print_outputs"].value = truncate_content(
+                str(state["_print_outputs"]), max_length=max_print_outputs_length
+            )
+            raise InterpreterError(
+                f"Code execution failed at line '{ast.get_source_segment(code, node)}' due to: {type(e).__name__}: {e}"
+            )
+    finally:
+        if previous_final_answer is not None:
+            static_tools["final_answer"] = previous_final_answer
+        state.pop("_static_tools_values", None)
 
 
 @dataclass

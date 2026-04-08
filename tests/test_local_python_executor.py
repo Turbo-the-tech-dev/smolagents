@@ -1655,7 +1655,8 @@ class TestEvaluateDelete:
             assert str(expectation) in str(exception_info.value)
         else:
             evaluate_delete(delete_node, state, {}, {}, [])
-            _ = state.pop("_operations_count", None)
+            state.pop("_operations_count", None)
+            state.pop("_static_tools_values", None)
             assert state == expectation
 
 
