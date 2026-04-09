@@ -887,10 +887,18 @@ def evaluate_call(
         state["_print_outputs"] += " ".join(map(str, args)) + "\n"
         return None
     else:  # Assume it's a callable object
-        if (inspect.getmodule(func) == builtins) and inspect.isbuiltin(func) and (func not in static_tools.values()):
-            raise InterpreterError(
-                f"Invoking a builtin function that has not been explicitly added as a tool is not allowed ({func_name})."
-            )
+        if isinstance(func, BuiltinFunctionType) and getattr(func, "__module__", None) == "builtins":
+            allowed_builtin = False
+            if "_static_tools_values" in state:
+                if func in state["_static_tools_values"]:
+                    allowed_builtin = True
+            elif static_tools and func in static_tools.values():
+                allowed_builtin = True
+
+            if not allowed_builtin:
+                raise InterpreterError(
+                    f"Invoking a builtin function that has not been explicitly added as a tool is not allowed ({func_name})."
+                )
         if (
             hasattr(func, "__name__")
             and func.__name__.startswith("__")
@@ -1499,7 +1507,6 @@ if hasattr(ast, "Index"):
     NODE_HANDLERS[ast.Index] = lambda expr, *args: evaluate_ast(expr.value, *args)
 
 
-@safer_eval
 def evaluate_ast(
     expression: ast.AST,
     state: dict[str, Any],
@@ -1535,11 +1542,26 @@ def evaluate_ast(
             f"Reached the max number of operations of {MAX_OPERATIONS}. Maybe there is an infinite loop somewhere in the code, or you're just asking too many calculations."
         )
     state["_operations_count"]["counter"] += 1
-    handler = NODE_HANDLERS.get(type(expression))
-    if handler:
-        return handler(expression, state, static_tools, custom_tools, authorized_imports)
-    # For now we refuse anything else. Let's add things as we need them.
-    raise InterpreterError(f"{expression.__class__.__name__} is not supported.")
+
+    # Fast path for common nodes
+    if isinstance(expression, ast.Constant):
+        return expression.value
+    if isinstance(expression, ast.Name):
+        result = evaluate_name(expression, state, static_tools, custom_tools, authorized_imports)
+    elif isinstance(expression, ast.Expr):
+        result = evaluate_ast(expression.value, state, static_tools, custom_tools, authorized_imports)
+    else:
+        handler = NODE_HANDLERS.get(type(expression))
+        if handler:
+            result = handler(expression, state, static_tools, custom_tools, authorized_imports)
+        else:
+            raise InterpreterError(f"{expression.__class__.__name__} is not supported.")
+
+    # Inlined safer_eval logic
+    if result is None or isinstance(result, (bool, int, float, str)):
+        return result
+    check_safer_result(result, static_tools, authorized_imports)
+    return result
 
 
 class FinalAnswerException(Exception):
@@ -1599,6 +1621,14 @@ def evaluate_python_code(
             raise FinalAnswerException(previous_final_answer(*args, **kwargs))
 
         static_tools["final_answer"] = final_answer
+    else:
+        previous_final_answer = None
+
+    # Cache static tool values for faster lookup in evaluate_call
+    # We use a set for O(1) membership checks.
+    # We save and restore any previous value to handle nested calls correctly.
+    previous_static_tools_values = state.get("_static_tools_values")
+    state["_static_tools_values"] = set(static_tools.values())
 
     try:
         for node in expression.body:
@@ -1621,6 +1651,14 @@ def evaluate_python_code(
         raise InterpreterError(
             f"Code execution failed at line '{ast.get_source_segment(code, node)}' due to: {type(e).__name__}: {e}"
         )
+    finally:
+        if previous_static_tools_values is not None:
+            state["_static_tools_values"] = previous_static_tools_values
+        else:
+            state.pop("_static_tools_values", None)
+
+        if previous_final_answer:
+            static_tools["final_answer"] = previous_final_answer
 
 
 @dataclass
