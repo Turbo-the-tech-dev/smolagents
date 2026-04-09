@@ -84,6 +84,18 @@ def nodunder_hasattr(obj, name):
     return hasattr(obj, name)
 
 
+class nodunder_type(type):
+    def __new__(cls, *args, **kwargs):
+        if len(args) == 3:
+            name, bases, attrs = args
+            if is_dunder(name):
+                raise InterpreterError(f"Forbidden access to dunder name: {name}")
+            for attr_name in attrs:
+                if is_dunder(attr_name):
+                    raise InterpreterError(f"Forbidden access to dunder attribute: {attr_name}")
+        return type(*args, **kwargs)
+
+
 BASE_PYTHON_TOOLS = {
     "print": custom_print,
     "isinstance": isinstance,
@@ -135,7 +147,7 @@ BASE_PYTHON_TOOLS = {
     "hasattr": nodunder_hasattr,
     "setattr": nodunder_setattr,
     "issubclass": issubclass,
-    "type": type,
+    "type": nodunder_type,
     "complex": complex,
 }
 
@@ -542,7 +554,7 @@ def evaluate_class_def(
 
     for stmt in class_def.body:
         if isinstance(stmt, ast.FunctionDef):
-            class_dict[stmt.name] = evaluate_ast(stmt, state, static_tools, custom_tools, authorized_imports)
+            class_dict[stmt.name] = create_function(stmt, state, static_tools, custom_tools, authorized_imports)
         elif isinstance(stmt, ast.AnnAssign):
             if stmt.value:
                 value = evaluate_ast(stmt.value, state, static_tools, custom_tools, authorized_imports)
