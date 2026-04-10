@@ -66,6 +66,14 @@ def is_dunder(name):
     return name.startswith("__") and name.endswith("__")
 
 
+INTERNAL_PROTECTED_NAMES = {"_operations_count", "_print_outputs"}
+
+
+def check_protected_name(name):
+    if name in INTERNAL_PROTECTED_NAMES or is_dunder(name):
+        raise InterpreterError(f"Forbidden access to protected name: {name}")
+
+
 def nodunder_getattr(obj, name, default=None):
     if is_dunder(name):
         raise InterpreterError(f"Forbidden access to dunder attribute: {name}")
@@ -782,6 +790,7 @@ def set_value(
     authorized_imports: list[str],
 ) -> None:
     if isinstance(target, ast.Name):
+        check_protected_name(target.id)
         if target.id in static_tools:
             raise InterpreterError(f"Cannot assign to name '{target.id}': doing this would erase the existing tool!")
         state[target.id] = value
@@ -929,6 +938,7 @@ def evaluate_name(
     custom_tools: dict[str, Callable],
     authorized_imports: list[str],
 ) -> Any:
+    check_protected_name(name.id)
     if name.id in state:
         return state[name.id]
     elif name.id in static_tools:
@@ -1420,6 +1430,7 @@ def evaluate_delete(
     """
     for target in delete_node.targets:
         if isinstance(target, ast.Name):
+            check_protected_name(target.id)
             # Handle simple variable deletion (del x)
             if target.id in state:
                 del state[target.id]
