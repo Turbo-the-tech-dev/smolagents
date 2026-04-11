@@ -412,6 +412,25 @@ class GradioUI:
             self.agent.interrupt()
         return gr.update(visible=False), gr.update(interactive=True, visible=True)
 
+    def reset_ui_state(self):
+        import gradio as gr
+
+        if self.file_upload_folder is not None:
+            return (
+                [],  # stored_messages
+                [],  # file_uploads_log
+                gr.update(visible=False, value=None),  # upload_status
+                gr.update(interactive=True, visible=True),  # submit_btn
+                gr.update(visible=False),  # stop_btn
+            )
+        else:
+            return (
+                [],  # stored_messages
+                [],  # file_uploads_log
+                gr.update(interactive=True, visible=True),  # submit_btn
+                gr.update(visible=False),  # stop_btn
+            )
+
     def launch(self, share: bool = True, **kwargs):
         """
         Launch the Gradio app with the agent interface.
@@ -430,6 +449,7 @@ class GradioUI:
             session_state = gr.State({})
             stored_messages = gr.State([])
             file_uploads_log = gr.State([])
+            upload_status = None
 
             with gr.Sidebar():
                 gr.Markdown(
@@ -473,7 +493,7 @@ class GradioUI:
                 ),
                 resizable=True,
                 scale=1,
-                buttons=["copy"],
+                buttons=["copy", "clear"],
                 latex_delimiters=[
                     {"left": r"$$", "right": r"$$", "display": True},
                     {"left": r"$", "right": r"$", "display": False},
@@ -518,7 +538,15 @@ class GradioUI:
 
             stop_btn.click(self.interrupt_agent, None, [stop_btn, submit_btn], cancels=[submit_event, click_event])
 
-            chatbot.clear(self.agent.memory.reset)
+            clear_outputs = [stored_messages, file_uploads_log, submit_btn, stop_btn]
+            if self.file_upload_folder is not None:
+                clear_outputs.insert(2, upload_status)
+
+            chatbot.clear(lambda: self.agent.memory.reset()).then(
+                self.reset_ui_state,
+                outputs=clear_outputs,
+                cancels=[submit_event, click_event],
+            )
         return demo
 
 
