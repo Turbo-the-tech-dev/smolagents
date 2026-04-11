@@ -32,7 +32,7 @@ def get_step_footnote_content(step_log: ActionStep | PlanningStep, step_name: st
     if step_log.token_usage is not None:
         step_footnote += f" | Input tokens: {step_log.token_usage.input_tokens:,} | Output tokens: {step_log.token_usage.output_tokens:,}"
     step_footnote += f" | Duration: {round(float(step_log.timing.duration), 2)}s" if step_log.timing.duration else ""
-    step_footnote_content = f"""<span style="color: #bbbbc2; font-size: 12px;">{step_footnote}</span> """
+    step_footnote_content = f"""<span style="opacity: 0.7; font-size: 12px;">{step_footnote}</span> """
     return step_footnote_content
 
 
@@ -412,6 +412,24 @@ class GradioUI:
             self.agent.interrupt()
         return gr.update(visible=False), gr.update(interactive=True, visible=True)
 
+    def reset_ui_state(self):
+        import gradio as gr
+
+        outputs = [
+            [],  # stored_messages
+            [],  # file_uploads_log
+        ]
+        if self.file_upload_folder is not None:
+            outputs.append(gr.update(visible=False))  # upload_status
+
+        outputs.extend(
+            [
+                gr.update(interactive=True, visible=True),  # submit_btn
+                gr.update(visible=False),  # stop_btn
+            ]
+        )
+        return tuple(outputs)
+
     def launch(self, share: bool = True, **kwargs):
         """
         Launch the Gradio app with the agent interface.
@@ -432,6 +450,15 @@ class GradioUI:
             file_uploads_log = gr.State([])
 
             with gr.Sidebar():
+                gr.HTML(
+                    """
+                    <div style="text-align: center;">
+                        <img src="https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/smolagents/mascot_smol.png"
+                             alt="smolagents mascot"
+                             style="max-width: 240px; height: auto; margin: 0 auto; display: block;">
+                    </div>
+                    """
+                )
                 gr.Markdown(
                     f"# {self.name.replace('_', ' ').capitalize()}"
                     "\n> This web ui allows you to interact with a `smolagents` agent that can use tools and execute steps to complete tasks."
@@ -461,7 +488,7 @@ class GradioUI:
                     )
 
                 gr.HTML(
-                    "<br><br><h4><center>Powered by <a target='_blank' href='https://github.com/huggingface/smolagents'><b>smolagents</b></a></center></h4>"
+                    "<br><br><h4 style='text-align: center;'>Powered by <a target='_blank' href='https://github.com/huggingface/smolagents'><b>smolagents</b></a></h4>"
                 )
 
             # Main chat interface
@@ -473,7 +500,7 @@ class GradioUI:
                 ),
                 resizable=True,
                 scale=1,
-                buttons=["copy"],
+                buttons=["copy", "clear"],
                 latex_delimiters=[
                     {"left": r"$$", "right": r"$$", "display": True},
                     {"left": r"$", "right": r"$", "display": False},
@@ -518,7 +545,28 @@ class GradioUI:
 
             stop_btn.click(self.interrupt_agent, None, [stop_btn, submit_btn], cancels=[submit_event, click_event])
 
-            chatbot.clear(self.agent.memory.reset)
+            if self.file_upload_folder is not None:
+                chatbot.clear(
+                    self.agent.memory.reset,
+                    None,
+                    None,
+                    cancels=[submit_event, click_event],
+                ).then(
+                    self.reset_ui_state,
+                    None,
+                    [stored_messages, file_uploads_log, upload_status, submit_btn, stop_btn],
+                )
+            else:
+                chatbot.clear(
+                    self.agent.memory.reset,
+                    None,
+                    None,
+                    cancels=[submit_event, click_event],
+                ).then(
+                    self.reset_ui_state,
+                    None,
+                    [stored_messages, file_uploads_log, submit_btn, stop_btn],
+                )
         return demo
 
 
