@@ -400,9 +400,20 @@ class GradioUI:
                 else ""
             ),
             "",
-            [],
+            file_uploads_log,
             gr.update(visible=False, interactive=False),
             gr.update(visible=True, interactive=True),
+        )
+
+    def reset_ui_state(self):
+        import gradio as gr
+
+        return (
+            [],
+            [],
+            gr.update(value=None, visible=False),
+            gr.update(interactive=True, visible=True),
+            gr.update(visible=False),
         )
 
     def interrupt_agent(self):
@@ -442,7 +453,8 @@ class GradioUI:
                     gr.Markdown("**Your request**", container=True)
                     text_input = gr.Textbox(
                         lines=3,
-                        label="Chat Message",
+                        label="Agent prompt",
+                        show_label=False,
                         container=False,
                         placeholder="Enter your prompt here and press Shift+Enter or press the button",
                         autofocus=True,
@@ -451,6 +463,7 @@ class GradioUI:
                     stop_btn = gr.Button("🛑 Stop", variant="danger", visible=False)
 
                 # If an upload folder is provided, enable the upload feature
+                upload_status = None
                 if self.file_upload_folder is not None:
                     upload_file = gr.File(label="Upload a file")
                     upload_status = gr.Textbox(label="Upload Status", interactive=False, visible=False)
@@ -461,7 +474,7 @@ class GradioUI:
                     )
 
                 gr.HTML(
-                    "<br><br><h4><center>Powered by <a target='_blank' href='https://github.com/huggingface/smolagents'><b>smolagents</b></a></center></h4>"
+                    "<br><br><h4><div style='text-align: center;'>Powered by <a target='_blank' href='https://github.com/huggingface/smolagents'><b>smolagents</b></a></div></h4>"
                 )
 
             # Main chat interface
@@ -473,7 +486,7 @@ class GradioUI:
                 ),
                 resizable=True,
                 scale=1,
-                buttons=["copy"],
+                buttons=["copy", "clear"],
                 latex_delimiters=[
                     {"left": r"$$", "right": r"$$", "display": True},
                     {"left": r"$", "right": r"$", "display": False},
@@ -518,7 +531,20 @@ class GradioUI:
 
             stop_btn.click(self.interrupt_agent, None, [stop_btn, submit_btn], cancels=[submit_event, click_event])
 
-            chatbot.clear(self.agent.memory.reset)
+            if self.file_upload_folder is not None:
+                chatbot.clear(self.agent.memory.reset).then(
+                    self.reset_ui_state,
+                    None,
+                    [stored_messages, file_uploads_log, upload_status, submit_btn, stop_btn],
+                    cancels=[submit_event, click_event],
+                )
+            else:
+                chatbot.clear(self.agent.memory.reset).then(
+                    lambda: ([], [], gr.update(interactive=True, visible=True), gr.update(visible=False)),
+                    None,
+                    [stored_messages, file_uploads_log, submit_btn, stop_btn],
+                    cancels=[submit_event, click_event],
+                )
         return demo
 
 
