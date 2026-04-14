@@ -32,7 +32,7 @@ def get_step_footnote_content(step_log: ActionStep | PlanningStep, step_name: st
     if step_log.token_usage is not None:
         step_footnote += f" | Input tokens: {step_log.token_usage.input_tokens:,} | Output tokens: {step_log.token_usage.output_tokens:,}"
     step_footnote += f" | Duration: {round(float(step_log.timing.duration), 2)}s" if step_log.timing.duration else ""
-    step_footnote_content = f"""<span style="color: #bbbbc2; font-size: 12px;">{step_footnote}</span> """
+    step_footnote_content = f"""<span style="opacity: 0.7; font-size: 12px;">{step_footnote}</span> """
     return step_footnote_content
 
 
@@ -422,6 +422,19 @@ class GradioUI:
         """
         self.create_app().launch(debug=True, share=share, **kwargs)
 
+    def reset_ui_state(self):
+        import gradio as gr
+
+        outputs = [
+            [],  # stored_messages
+            [],  # file_uploads_log
+            gr.update(visible=True, interactive=True),  # submit_btn
+            gr.update(visible=False),  # stop_btn
+        ]
+        if self.file_upload_folder is not None:
+            outputs.append(gr.update(visible=False, value=""))  # upload_status
+        return tuple(outputs)
+
     def create_app(self):
         import gradio as gr
 
@@ -451,6 +464,7 @@ class GradioUI:
                     stop_btn = gr.Button("🛑 Stop", variant="danger", visible=False)
 
                 # If an upload folder is provided, enable the upload feature
+                upload_status = None
                 if self.file_upload_folder is not None:
                     upload_file = gr.File(label="Upload a file")
                     upload_status = gr.Textbox(label="Upload Status", interactive=False, visible=False)
@@ -461,7 +475,7 @@ class GradioUI:
                     )
 
                 gr.HTML(
-                    "<br><br><h4><center>Powered by <a target='_blank' href='https://github.com/huggingface/smolagents'><b>smolagents</b></a></center></h4>"
+                    "<br><br><h4 style='text-align: center;'>Powered by <a target='_blank' href='https://github.com/huggingface/smolagents'><b>smolagents</b></a></h4>"
                 )
 
             # Main chat interface
@@ -518,7 +532,13 @@ class GradioUI:
 
             stop_btn.click(self.interrupt_agent, None, [stop_btn, submit_btn], cancels=[submit_event, click_event])
 
-            chatbot.clear(self.agent.memory.reset)
+            clear_outputs = [stored_messages, file_uploads_log, submit_btn, stop_btn]
+            if upload_status is not None:
+                clear_outputs.append(upload_status)
+
+            chatbot.clear(self.reset_ui_state, None, clear_outputs).then(
+                self.agent.memory.reset, None, None, cancels=[submit_event, click_event]
+            )
         return demo
 
 
