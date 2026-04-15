@@ -412,6 +412,20 @@ class GradioUI:
             self.agent.interrupt()
         return gr.update(visible=False), gr.update(interactive=True, visible=True)
 
+    def reset_ui_state(self):
+        import gradio as gr
+
+        self.agent.memory.reset()
+        if self.file_upload_folder is not None:
+            return (
+                [],
+                [],
+                gr.update(value="", visible=False),
+                gr.update(visible=True, interactive=True),
+                gr.update(visible=False),
+            )
+        return [], [], gr.update(visible=True, interactive=True), gr.update(visible=False)
+
     def launch(self, share: bool = True, **kwargs):
         """
         Launch the Gradio app with the agent interface.
@@ -451,6 +465,7 @@ class GradioUI:
                     stop_btn = gr.Button("🛑 Stop", variant="danger", visible=False)
 
                 # If an upload folder is provided, enable the upload feature
+                upload_status = None
                 if self.file_upload_folder is not None:
                     upload_file = gr.File(label="Upload a file")
                     upload_status = gr.Textbox(label="Upload Status", interactive=False, visible=False)
@@ -473,7 +488,7 @@ class GradioUI:
                 ),
                 resizable=True,
                 scale=1,
-                buttons=["copy"],
+                buttons=["copy", "clear"],
                 latex_delimiters=[
                     {"left": r"$$", "right": r"$$", "display": True},
                     {"left": r"$", "right": r"$", "display": False},
@@ -518,7 +533,20 @@ class GradioUI:
 
             stop_btn.click(self.interrupt_agent, None, [stop_btn, submit_btn], cancels=[submit_event, click_event])
 
-            chatbot.clear(self.agent.memory.reset)
+            if self.file_upload_folder is not None:
+                chatbot.clear(
+                    self.reset_ui_state,
+                    None,
+                    [stored_messages, file_uploads_log, upload_status, submit_btn, stop_btn],
+                    cancels=[submit_event, click_event],
+                )
+            else:
+                chatbot.clear(
+                    self.reset_ui_state,
+                    None,
+                    [stored_messages, file_uploads_log, submit_btn, stop_btn],
+                    cancels=[submit_event, click_event],
+                )
         return demo
 
 
