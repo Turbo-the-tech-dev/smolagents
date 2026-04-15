@@ -130,6 +130,27 @@ class GradioUITester(unittest.TestCase):
             self.assertIn("File uploaded:", textbox.value)
             self.assertEqual(len(uploads_log), 1)
 
+    def test_reset_ui_state(self):
+        """Test reset_ui_state method"""
+        # Case with file upload folder
+        stored_messages, file_uploads_log, upload_status, submit_btn, stop_btn = self.ui.reset_ui_state()
+        self.assertEqual(stored_messages, [])
+        self.assertEqual(file_uploads_log, [])
+        self.assertFalse(upload_status["visible"])
+        self.assertTrue(submit_btn["visible"])
+        self.assertFalse(stop_btn["visible"])
+        self.mock_agent.memory.reset.assert_called_once()
+
+        # Case without file upload folder
+        self.ui.file_upload_folder = None
+        self.mock_agent.memory.reset.reset_mock()
+        stored_messages, file_uploads_log, submit_btn, stop_btn = self.ui.reset_ui_state()
+        self.assertEqual(stored_messages, [])
+        self.assertEqual(file_uploads_log, [])
+        self.assertTrue(submit_btn["visible"])
+        self.assertFalse(stop_btn["visible"])
+        self.mock_agent.memory.reset.assert_called_once()
+
 
 class TestStreamToGradio:
     """Tests for the stream_to_gradio function."""
@@ -361,7 +382,11 @@ class TestPullMessagesFromStep:
 
     def test_final_answer_step_audio(self):
         """Test FinalAnswerStep with audio answer."""
-        with patch.object(AgentAudio, "to_string", return_value="path/to/audio.wav"):
+        with (
+            patch("smolagents.agent_types._is_package_available", return_value=True),
+            patch.dict("sys.modules", {"torch": Mock(), "numpy": Mock()}),
+            patch.object(AgentAudio, "to_string", return_value="path/to/audio.wav"),
+        ):
             step = FinalAnswerStep(output=AgentAudio("path/to/audio.wav"))
             messages = list(pull_messages_from_step(step))
             assert len(messages) == 1
