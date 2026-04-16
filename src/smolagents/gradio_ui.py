@@ -32,7 +32,7 @@ def get_step_footnote_content(step_log: ActionStep | PlanningStep, step_name: st
     if step_log.token_usage is not None:
         step_footnote += f" | Input tokens: {step_log.token_usage.input_tokens:,} | Output tokens: {step_log.token_usage.output_tokens:,}"
     step_footnote += f" | Duration: {round(float(step_log.timing.duration), 2)}s" if step_log.timing.duration else ""
-    step_footnote_content = f"""<span style="color: #bbbbc2; font-size: 12px;">{step_footnote}</span> """
+    step_footnote_content = f"""<span style="opacity: 0.7; font-size: 12px;">{step_footnote}</span> """
     return step_footnote_content
 
 
@@ -400,7 +400,7 @@ class GradioUI:
                 else ""
             ),
             "",
-            [],
+            file_uploads_log,
             gr.update(visible=False, interactive=False),
             gr.update(visible=True, interactive=True),
         )
@@ -411,6 +411,19 @@ class GradioUI:
         if hasattr(self.agent, "interrupt"):
             self.agent.interrupt()
         return gr.update(visible=False), gr.update(interactive=True, visible=True)
+
+    def reset_ui_state(self):
+        import gradio as gr
+
+        outputs = [
+            [],  # stored_messages
+            [],  # file_uploads_log
+            gr.update(interactive=True, visible=True),  # submit_btn
+            gr.update(visible=False),  # stop_btn
+        ]
+        if self.file_upload_folder is not None:
+            outputs.insert(2, gr.update(value=None, visible=False))  # upload_status
+        return tuple(outputs)
 
     def launch(self, share: bool = True, **kwargs):
         """
@@ -442,7 +455,8 @@ class GradioUI:
                     gr.Markdown("**Your request**", container=True)
                     text_input = gr.Textbox(
                         lines=3,
-                        label="Chat Message",
+                        label="Agent prompt",
+                        show_label=False,
                         container=False,
                         placeholder="Enter your prompt here and press Shift+Enter or press the button",
                         autofocus=True,
@@ -450,6 +464,7 @@ class GradioUI:
                     submit_btn = gr.Button("🚀 Submit", variant="primary")
                     stop_btn = gr.Button("🛑 Stop", variant="danger", visible=False)
 
+                upload_status = None
                 # If an upload folder is provided, enable the upload feature
                 if self.file_upload_folder is not None:
                     upload_file = gr.File(label="Upload a file")
@@ -461,7 +476,7 @@ class GradioUI:
                     )
 
                 gr.HTML(
-                    "<br><br><h4><center>Powered by <a target='_blank' href='https://github.com/huggingface/smolagents'><b>smolagents</b></a></center></h4>"
+                    "<br><br><div style='text-align: center;'><h4>Powered by <a target='_blank' href='https://github.com/huggingface/smolagents'><b>smolagents</b></a></h4></div>"
                 )
 
             # Main chat interface
@@ -473,7 +488,7 @@ class GradioUI:
                 ),
                 resizable=True,
                 scale=1,
-                buttons=["copy"],
+                buttons=["copy", "clear"],
                 latex_delimiters=[
                     {"left": r"$$", "right": r"$$", "display": True},
                     {"left": r"$", "right": r"$", "display": False},
@@ -518,7 +533,16 @@ class GradioUI:
 
             stop_btn.click(self.interrupt_agent, None, [stop_btn, submit_btn], cancels=[submit_event, click_event])
 
-            chatbot.clear(self.agent.memory.reset)
+            clear_outputs = [stored_messages, file_uploads_log, submit_btn, stop_btn]
+            if self.file_upload_folder is not None:
+                clear_outputs.insert(2, upload_status)
+
+            chatbot.clear(self.agent.memory.reset).then(
+                self.reset_ui_state,
+                None,
+                clear_outputs,
+                cancels=[submit_event, click_event],
+            )
         return demo
 
 
