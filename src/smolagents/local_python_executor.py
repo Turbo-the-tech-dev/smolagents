@@ -16,6 +16,7 @@
 # limitations under the License.
 import ast
 import builtins
+import sys
 import difflib
 import inspect
 import logging
@@ -1499,7 +1500,6 @@ if hasattr(ast, "Index"):
     NODE_HANDLERS[ast.Index] = lambda expr, *args: evaluate_ast(expr.value, *args)
 
 
-@safer_eval
 def evaluate_ast(
     expression: ast.AST,
     state: dict[str, Any],
@@ -1535,9 +1535,26 @@ def evaluate_ast(
             f"Reached the max number of operations of {MAX_OPERATIONS}. Maybe there is an infinite loop somewhere in the code, or you're just asking too many calculations."
         )
     state["_operations_count"]["counter"] += 1
+
+    # Fast paths for common nodes
+    if isinstance(expression, ast.Constant):
+        return expression.value
+    if isinstance(expression, ast.Name):
+        result = evaluate_name(expression, state, static_tools, custom_tools, authorized_imports)
+        if result is None or isinstance(result, (bool, int, float, str)):
+            return result
+        check_safer_result(result, static_tools, authorized_imports)
+        return result
+    if isinstance(expression, ast.Expr):
+        return evaluate_ast(expression.value, state, static_tools, custom_tools, authorized_imports)
+
     handler = NODE_HANDLERS.get(type(expression))
     if handler:
-        return handler(expression, state, static_tools, custom_tools, authorized_imports)
+        result = handler(expression, state, static_tools, custom_tools, authorized_imports)
+        if result is None or isinstance(result, (bool, int, float, str)):
+            return result
+        check_safer_result(result, static_tools, authorized_imports)
+        return result
     # For now we refuse anything else. Let's add things as we need them.
     raise InterpreterError(f"{expression.__class__.__name__} is not supported.")
 
@@ -1575,6 +1592,10 @@ def evaluate_python_code(
             updated by this function to contain all variables as they are evaluated.
             The print outputs will be stored in the state under the key "_print_outputs".
     """
+    # Set recursion limit to a safe value to prevent stack overflows during deep AST evaluation.
+    # The default is often 1000, which might be too low for some recursive guest code.
+    # We increase it slightly here, but MAX_OPERATIONS remains the primary safety boundary.
+    sys.setrecursionlimit(2000)
     try:
         expression = ast.parse(code)
     except SyntaxError as e:
