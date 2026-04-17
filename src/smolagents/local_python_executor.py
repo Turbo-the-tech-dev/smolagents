@@ -445,16 +445,15 @@ def create_function(
     authorized_imports: list[str],
 ) -> Callable:
     source_code = ast.unparse(func_def)
+    arg_names = [arg.arg for arg in func_def.args.args]
+    default_values = [
+        evaluate_ast(d, state, static_tools, custom_tools, authorized_imports) for d in func_def.args.defaults
+    ]
+    # Apply default values
+    defaults = dict(zip(arg_names[-len(default_values) :], default_values))
 
     def new_func(*args: Any, **kwargs: Any) -> Any:
         func_state = state.copy()
-        arg_names = [arg.arg for arg in func_def.args.args]
-        default_values = [
-            evaluate_ast(d, state, static_tools, custom_tools, authorized_imports) for d in func_def.args.defaults
-        ]
-
-        # Apply default values
-        defaults = dict(zip(arg_names[-len(default_values) :], default_values))
 
         # Set positional arguments
         for name, value in zip(arg_names, args):
@@ -887,7 +886,11 @@ def evaluate_call(
         state["_print_outputs"] += " ".join(map(str, args)) + "\n"
         return None
     else:  # Assume it's a callable object
-        if (inspect.getmodule(func) == builtins) and inspect.isbuiltin(func) and (func not in static_tools.values()):
+        if (
+            getattr(func, "__module__", None) == "builtins"
+            and isinstance(func, BuiltinFunctionType)
+            and (func not in static_tools.get("_static_tools_values", static_tools.values()))
+        ):
             raise InterpreterError(
                 f"Invoking a builtin function that has not been explicitly added as a tool is not allowed ({func_name})."
             )
@@ -1499,7 +1502,6 @@ if hasattr(ast, "Index"):
     NODE_HANDLERS[ast.Index] = lambda expr, *args: evaluate_ast(expr.value, *args)
 
 
-@safer_eval
 def evaluate_ast(
     expression: ast.AST,
     state: dict[str, Any],
@@ -1535,9 +1537,25 @@ def evaluate_ast(
             f"Reached the max number of operations of {MAX_OPERATIONS}. Maybe there is an infinite loop somewhere in the code, or you're just asking too many calculations."
         )
     state["_operations_count"]["counter"] += 1
+
+    # Fast paths for common nodes
+    if isinstance(expression, ast.Constant):
+        return expression.value
+    if isinstance(expression, ast.Name):
+        result = evaluate_name(expression, state, static_tools, custom_tools, authorized_imports)
+        if result is None or isinstance(result, (bool, int, float, str)):
+            return result
+        check_safer_result(result, static_tools, authorized_imports)
+        return result
+    if isinstance(expression, ast.Expr):
+        return evaluate_ast(expression.value, state, static_tools, custom_tools, authorized_imports)
     handler = NODE_HANDLERS.get(type(expression))
     if handler:
-        return handler(expression, state, static_tools, custom_tools, authorized_imports)
+        result = handler(expression, state, static_tools, custom_tools, authorized_imports)
+        if result is None or isinstance(result, (bool, int, float, str)):
+            return result
+        check_safer_result(result, static_tools, authorized_imports)
+        return result
     # For now we refuse anything else. Let's add things as we need them.
     raise InterpreterError(f"{expression.__class__.__name__} is not supported.")
 
@@ -1592,6 +1610,10 @@ def evaluate_python_code(
     state["_print_outputs"] = PrintContainer()
     state["_operations_count"] = {"counter": 0}
 
+    # Pre-calculate static tools values for faster lookup in evaluate_call
+    # We use a try...finally block to ensure it is cleaned up and doesn't leak into state
+    static_tools_values = set(static_tools.values())
+
     if "final_answer" in static_tools:
         previous_final_answer = static_tools["final_answer"]
 
@@ -1601,6 +1623,7 @@ def evaluate_python_code(
         static_tools["final_answer"] = final_answer
 
     try:
+        static_tools["_static_tools_values"] = static_tools_values
         for node in expression.body:
             result = evaluate_ast(node, state, static_tools, custom_tools, authorized_imports)
         state["_print_outputs"].value = truncate_content(
@@ -1621,6 +1644,8 @@ def evaluate_python_code(
         raise InterpreterError(
             f"Code execution failed at line '{ast.get_source_segment(code, node)}' due to: {type(e).__name__}: {e}"
         )
+    finally:
+        static_tools.pop("_static_tools_values", None)
 
 
 @dataclass
