@@ -361,12 +361,19 @@ class TestPullMessagesFromStep:
 
     def test_final_answer_step_audio(self):
         """Test FinalAnswerStep with audio answer."""
-        with patch.object(AgentAudio, "to_string", return_value="path/to/audio.wav"):
-            step = FinalAnswerStep(output=AgentAudio("path/to/audio.wav"))
-            messages = list(pull_messages_from_step(step))
-            assert len(messages) == 1
-            assert messages[0].content["path"] == "path/to/audio.wav"
-            assert messages[0].content["mime_type"] == "audio/wav"
+        import sys
+        from unittest.mock import MagicMock
+
+        with patch.dict(sys.modules, {"soundfile": MagicMock(), "torch": MagicMock(), "numpy": MagicMock()}):
+            with (
+                patch("smolagents.agent_types._is_package_available", return_value=True),
+                patch.object(AgentAudio, "to_string", return_value="path/to/audio.wav"),
+            ):
+                step = FinalAnswerStep(output=AgentAudio("path/to/audio.wav"))
+                messages = list(pull_messages_from_step(step))
+                assert len(messages) == 1
+                assert messages[0].content["path"] == "path/to/audio.wav"
+                assert messages[0].content["mime_type"] == "audio/wav"
 
     def test_unsupported_step_type(self):
         """Test handling of unsupported step types."""
