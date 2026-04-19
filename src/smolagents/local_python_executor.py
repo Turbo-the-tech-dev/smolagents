@@ -55,7 +55,55 @@ ERRORS = {
 DEFAULT_MAX_LEN_OUTPUT = 50000
 MAX_OPERATIONS = 10000000
 MAX_WHILE_ITERATIONS = 1000000
-ALLOWED_DUNDER_METHODS = ["__init__", "__str__", "__repr__"]
+ALLOWED_DUNDER_METHODS = [
+    "__init__",
+    "__str__",
+    "__repr__",
+    "__getattr__",
+    "__getitem__",
+    "__setitem__",
+    "__len__",
+    "__enter__",
+    "__exit__",
+    "__call__",
+    "__add__",
+    "__sub__",
+    "__mul__",
+    "__truediv__",
+    "__floordiv__",
+    "__mod__",
+    "__pow__",
+    "__and__",
+    "__or__",
+    "__xor__",
+    "__lshift__",
+    "__rshift__",
+    "__iadd__",
+    "__isub__",
+    "__imul__",
+    "__itruediv__",
+    "__ifloordiv__",
+    "__imod__",
+    "__ipow__",
+    "__iand__",
+    "__ior__",
+    "__ixor__",
+    "__ilshift__",
+    "__irshift__",
+    "__neg__",
+    "__pos__",
+    "__abs__",
+    "__invert__",
+    "__lt__",
+    "__le__",
+    "__gt__",
+    "__ge__",
+    "__eq__",
+    "__ne__",
+    "__bool__",
+    "__iter__",
+    "__next__",
+]
 
 
 def custom_print(*args):
@@ -64,6 +112,14 @@ def custom_print(*args):
 
 def is_dunder(name):
     return name.startswith("__") and name.endswith("__")
+
+
+INTERNAL_PROTECTED_NAMES = {"_operations_count", "_print_outputs"}
+
+
+def check_protected_name(name):
+    if (is_dunder(name) and name not in ALLOWED_DUNDER_METHODS) or name in INTERNAL_PROTECTED_NAMES:
+        raise InterpreterError(f"Forbidden access to protected name: {name}")
 
 
 def nodunder_getattr(obj, name, default=None):
@@ -511,6 +567,7 @@ def evaluate_function_def(
     custom_tools: dict[str, Callable],
     authorized_imports: list[str],
 ) -> Callable:
+    check_protected_name(func_def.name)
     custom_tools[func_def.name] = create_function(func_def, state, static_tools, custom_tools, authorized_imports)
     return custom_tools[func_def.name]
 
@@ -523,6 +580,7 @@ def evaluate_class_def(
     authorized_imports: list[str],
 ) -> type:
     class_name = class_def.name
+    check_protected_name(class_name)
     bases = [evaluate_ast(base, state, static_tools, custom_tools, authorized_imports) for base in class_def.bases]
 
     # Determine the metaclass to use
@@ -782,6 +840,7 @@ def set_value(
     authorized_imports: list[str],
 ) -> None:
     if isinstance(target, ast.Name):
+        check_protected_name(target.id)
         if target.id in static_tools:
             raise InterpreterError(f"Cannot assign to name '{target.id}': doing this would erase the existing tool!")
         state[target.id] = value
@@ -929,6 +988,7 @@ def evaluate_name(
     custom_tools: dict[str, Callable],
     authorized_imports: list[str],
 ) -> Any:
+    check_protected_name(name.id)
     if name.id in state:
         return state[name.id]
     elif name.id in static_tools:
@@ -1287,6 +1347,9 @@ def get_safe_module(raw_module, authorized_imports, visited=None):
 def evaluate_import(expression, state, static_tools, custom_tools, authorized_imports):
     if isinstance(expression, ast.Import):
         for alias in expression.names:
+            check_protected_name(alias.name)
+            if alias.asname:
+                check_protected_name(alias.asname)
             if check_import_authorized(alias.name, authorized_imports):
                 raw_module = import_module(alias.name)
                 state[alias.asname or alias.name] = get_safe_module(raw_module, authorized_imports)
@@ -1302,15 +1365,18 @@ def evaluate_import(expression, state, static_tools, custom_tools, authorized_im
             if expression.names[0].name == "*":  # Handle "from module import *"
                 if hasattr(module, "__all__"):  # If module has __all__, import only those names
                     for name in module.__all__:
+                        check_protected_name(name)
                         state[name] = getattr(module, name)
                 else:  # If no __all__, import all public names (those not starting with '_')
                     for name in dir(module):
                         if not name.startswith("_"):
+                            check_protected_name(name)
                             state[name] = getattr(module, name)
             else:  # regular from imports
                 for alias in expression.names:
-                    if is_dunder(alias.name):
-                        raise InterpreterError(f"Forbidden import of dunder name: {alias.name}")
+                    check_protected_name(alias.name)
+                    if alias.asname:
+                        check_protected_name(alias.asname)
                     if hasattr(module, alias.name):
                         state[alias.asname or alias.name] = getattr(module, alias.name)
                     else:
@@ -1420,6 +1486,7 @@ def evaluate_delete(
     """
     for target in delete_node.targets:
         if isinstance(target, ast.Name):
+            check_protected_name(target.id)
             # Handle simple variable deletion (del x)
             if target.id in state:
                 del state[target.id]
