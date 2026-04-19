@@ -5,3 +5,7 @@
 ## 2026-03-02 - Import Tree Caching
 **Learning:** Redundant construction of the import authorization tree (splitting strings, building dicts) was a major bottleneck in every module/attribute access.
 **Action:** Use lru_cache for authorization checks, ensuring arguments are converted to hashable types (tuples) when necessary.
+
+## 2026-03-02 - Nested Interpreter State Management
+**Learning:** Pre-computed optimization states (like O(1) tool lookup sets) stored in the shared `state` dictionary can be corrupted by nested interpreter calls (e.g., an agent calling another agent as a tool).
+**Action:** Use a save-and-restore pattern with `try...finally` blocks in `evaluate_python_code` to ensure nested executions correctly preserve and restore the outer execution's optimization context.
