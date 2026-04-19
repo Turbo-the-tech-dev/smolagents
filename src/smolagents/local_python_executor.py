@@ -887,7 +887,11 @@ def evaluate_call(
         state["_print_outputs"] += " ".join(map(str, args)) + "\n"
         return None
     else:  # Assume it's a callable object
-        if (inspect.getmodule(func) == builtins) and inspect.isbuiltin(func) and (func not in static_tools.values()):
+        if (
+            getattr(func, "__module__", None) == "builtins"
+            and isinstance(func, BuiltinFunctionType)
+            and (func not in state.get("_static_tools_values", set()))
+        ):
             raise InterpreterError(
                 f"Invoking a builtin function that has not been explicitly added as a tool is not allowed ({func_name})."
             )
@@ -1499,7 +1503,6 @@ if hasattr(ast, "Index"):
     NODE_HANDLERS[ast.Index] = lambda expr, *args: evaluate_ast(expr.value, *args)
 
 
-@safer_eval
 def evaluate_ast(
     expression: ast.AST,
     state: dict[str, Any],
@@ -1535,11 +1538,26 @@ def evaluate_ast(
             f"Reached the max number of operations of {MAX_OPERATIONS}. Maybe there is an infinite loop somewhere in the code, or you're just asking too many calculations."
         )
     state["_operations_count"]["counter"] += 1
-    handler = NODE_HANDLERS.get(type(expression))
-    if handler:
-        return handler(expression, state, static_tools, custom_tools, authorized_imports)
-    # For now we refuse anything else. Let's add things as we need them.
-    raise InterpreterError(f"{expression.__class__.__name__} is not supported.")
+
+    # Fast paths for common nodes
+    if isinstance(expression, ast.Constant):
+        return expression.value
+    if isinstance(expression, ast.Name):
+        result = evaluate_name(expression, state, static_tools, custom_tools, authorized_imports)
+    elif isinstance(expression, ast.Expr):
+        return evaluate_ast(expression.value, state, static_tools, custom_tools, authorized_imports)
+    else:
+        handler = NODE_HANDLERS.get(type(expression))
+        if handler:
+            result = handler(expression, state, static_tools, custom_tools, authorized_imports)
+        else:
+            # For now we refuse anything else. Let's add things as we need them.
+            raise InterpreterError(f"{expression.__class__.__name__} is not supported.")
+
+    if result is None or isinstance(result, (bool, int, float, str)):
+        return result
+    check_safer_result(result, static_tools, authorized_imports)
+    return result
 
 
 class FinalAnswerException(Exception):
@@ -1600,27 +1618,38 @@ def evaluate_python_code(
 
         static_tools["final_answer"] = final_answer
 
+    # Pre-compute static tools values for O(1) lookups in evaluate_call
+    # We store the previous value to handle nested calls correctly
+    previous_static_tools_values = state.get("_static_tools_values")
+    state["_static_tools_values"] = set(static_tools.values())
+
     try:
-        for node in expression.body:
-            result = evaluate_ast(node, state, static_tools, custom_tools, authorized_imports)
-        state["_print_outputs"].value = truncate_content(
-            str(state["_print_outputs"]), max_length=max_print_outputs_length
-        )
-        is_final_answer = False
-        return result, is_final_answer
-    except FinalAnswerException as e:
-        state["_print_outputs"].value = truncate_content(
-            str(state["_print_outputs"]), max_length=max_print_outputs_length
-        )
-        is_final_answer = True
-        return e.value, is_final_answer
-    except Exception as e:
-        state["_print_outputs"].value = truncate_content(
-            str(state["_print_outputs"]), max_length=max_print_outputs_length
-        )
-        raise InterpreterError(
-            f"Code execution failed at line '{ast.get_source_segment(code, node)}' due to: {type(e).__name__}: {e}"
-        )
+        try:
+            for node in expression.body:
+                result = evaluate_ast(node, state, static_tools, custom_tools, authorized_imports)
+            state["_print_outputs"].value = truncate_content(
+                str(state["_print_outputs"]), max_length=max_print_outputs_length
+            )
+            is_final_answer = False
+            return result, is_final_answer
+        except FinalAnswerException as e:
+            state["_print_outputs"].value = truncate_content(
+                str(state["_print_outputs"]), max_length=max_print_outputs_length
+            )
+            is_final_answer = True
+            return e.value, is_final_answer
+        except Exception as e:
+            state["_print_outputs"].value = truncate_content(
+                str(state["_print_outputs"]), max_length=max_print_outputs_length
+            )
+            raise InterpreterError(
+                f"Code execution failed at line '{ast.get_source_segment(code, node)}' due to: {type(e).__name__}: {e}"
+            )
+    finally:
+        if previous_static_tools_values is None:
+            state.pop("_static_tools_values", None)
+        else:
+            state["_static_tools_values"] = previous_static_tools_values
 
 
 @dataclass
